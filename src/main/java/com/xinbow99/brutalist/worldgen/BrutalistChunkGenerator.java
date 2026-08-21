@@ -398,6 +398,13 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
      * 渠道就會只有方塊變了、高度圖沒變——玩家會卡在渠底的空氣裡。
      */
     private int land(RandomState random, int wx, int wz, int salt) {
+        // 鋪面優先：廣場與總站是**把地面整平**，不是在地面上疊一層
+        Plot deckPlot = plotCovering(random, wx, wz);
+        if (deckPlot != null) {
+            int deck = deckPlot.precinctLevel(wx, wz);
+            if (deck != Integer.MIN_VALUE) return deck;
+        }
+
         int raw = Ground.height(wx, wz, settings, salt);
         Channel dug = channelAt(random, wx, wz);
         return dug == null ? raw : dug.floor(wx, wz, raw);

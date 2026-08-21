@@ -284,17 +284,20 @@ public final class Plot {
      */
     private static Plot open(RandomSource build, int kind, int x0, int z0,
                              int width, int depth, Terrain terrain) {
-        int highest = Integer.MIN_VALUE;
+        // 取**平均**高度，不是最高。取最高的話整片鋪面會架在一座台基上，從外面看是
+        // 憑空高出好幾層的一塊台地；取平均則是有挖有填，鋪面貼著地走。
+        // 高出來的部分由地表生成削掉（見生成器的 land()），低的部分由基座補
+        long sum = 0;
         for (int i = 0; i <= 12; i++) {
             for (int j = 0; j <= 12; j++) {
-                highest = Math.max(highest,
-                        terrain.heightAt(x0 + width * i / 12, z0 + depth * j / 12));
+                sum += terrain.heightAt(x0 + width * i / 12, z0 + depth * j / 12);
             }
         }
+        int level = (int) (sum / 169);
 
         Masonry.Palette palette = Masonry.roll(build);
         Precinct precinct = Precinct.roll(build, kind, width, depth);
-        return new Plot(x0, z0, highest + 1, width, depth, precinct.top() + 1, Form.SLAB,
+        return new Plot(x0, z0, level, width, depth, precinct.top() + 1, Form.SLAB,
                 6, 5, 8, 3, 26, 12, 4, 2, true, 0, 12, 3,
                 palette, 16, build.nextInt(), 2f,
                 NO_BOXES, null, new Rooftop(new Rooftop.Item[0], 0, 0), precinct);
@@ -519,9 +522,10 @@ public final class Plot {
      * 架空層的基座才會只在柱子底下——那正好是柱子該落地的地方。
      */
     public boolean footprintSolid(int wx, int wz) {
-        int u = wx - x0;
-        int v = wz - z0;
-        return precinct != null ? precinct.covers(u, v) : solid(u, v, 0);
+        // 鋪面不需要基座：地面已經被整到鋪面的高度了（見 precinctLevel）。
+        // 還補基座的話，往下挖出來的軌道溝會被基座整條填回去
+        if (precinct != null) return false;
+        return solid(wx - x0, wz - z0, 0);
     }
 
     /**
@@ -531,7 +535,23 @@ public final class Plot {
      * {@code minY} 本身不能動：基座是填到量體的底，不是填到樓梯的底。
      */
     public int scanFloor() {
+        if (precinct != null) return baseY - 6;          // 軌道溝跟溝壁都在鋪面以下
         return stair == null ? baseY : baseY - Stair.DIG;
+    }
+
+    /**
+     * 鋪面那一格的**地面高度**，{@link Integer#MIN_VALUE} ＝ 這一柱不歸鋪面管。
+     *
+     * <p>生成器的 {@code land()} 靠它把地表直接生成在正確的高度：高的地方削掉、
+     * 低的地方填起來、軌道區挖下去。這樣高度圖與柱體取樣自動就是對的，
+     * 不必事後再挖一次空氣——那正是廣場會憑空高出一截的原因。
+     */
+    public int precinctLevel(int wx, int wz) {
+        if (precinct == null) return Integer.MIN_VALUE;
+        int u = wx - x0;
+        int v = wz - z0;
+        if (!precinct.covers(u, v)) return Integer.MIN_VALUE;
+        return baseY + precinct.levelAt(u, v);
     }
 
     /** 這一柱在不在這棟樓的水平範圍內。 */

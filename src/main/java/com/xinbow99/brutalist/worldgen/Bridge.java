@@ -104,7 +104,9 @@ public record Bridge(boolean alongX, int centre, int from, int to, int y,
             int wz = alongX ? centre : t;
             // 樓板高度與半腰各驗一次：只驗一格的話會剛好落在一條窗帶上
             if (plot.blockAt(wx, y, wz) != null && plot.blockAt(wx, y + tall / 2, wz) != null) {
-                return t - step * 2;        // 再往外推兩格，橋是插進牆裡的
+                // 往**裡面**再推兩格。step 是往內走的方向，所以要加不是減——
+                // 減的話橋會停在牆外兩格，兩頭各留一道縫
+                return t + step * 2;
             }
         }
         return NONE;

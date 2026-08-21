@@ -74,10 +74,16 @@ public record Shelter(int x0, int z0, int baseY, boolean alongX,
     public int maxZ() { return alongX ? z0 + wide : z0 + len; }
     public int maxY() { return baseY + tall + 3; }
 
-    /** 這一柱有沒有鋪面。基座要靠它往下補到地面。 */
+    /**
+     * 這一柱有沒有鋪面。基座要靠它往下補到地面。
+     *
+     * <p>**站牌那一柱也算**。它站在亭子外面兩格，不含進來的話它腳下沒有基座，
+     * 地面一低就會浮起來一格——一根浮空的站牌比沒有站牌還糟。
+     */
     public boolean covers(int wx, int wz) {
         int u = alongX ? wx - x0 : wz - z0;
         int v = alongX ? wz - z0 : wx - x0;
+        if (u == -2 && v == wide / 2) return true;
         return u >= 0 && u < len && v >= 0 && v < wide;
     }
 
@@ -122,6 +128,7 @@ public record Shelter(int x0, int z0, int baseY, boolean alongX,
      */
     private BlockState sign(int u, int v, int h) {
         if (u != -2 || v != wide / 2) return null;
+        if (h == 0) return palette.at(0, 0, 0);          // 站牌腳下的那一小塊鋪面
         if (h >= 1 && h <= 3) return POST;
         if (h == 4 || h == 5) return BOARD;
         return null;
