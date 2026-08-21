@@ -349,7 +349,7 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
      */
     @Override
     public int getSpawnHeight(LevelHeightAccessor level) {
-        return settings.ground() + settings.relief() + 1;
+        return Ground.ceiling(settings);
     }
 
     @Override

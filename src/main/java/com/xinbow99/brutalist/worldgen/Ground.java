@@ -8,7 +8,10 @@ import net.minecraft.world.level.block.state.BlockState;
  *
  * <h2>為什麼是雜訊，不是格線</h2>
  * <p>廢土感的來源是**不規則**。任何週期性的圖案——每 N 格一塊草皮、棋盤、格線——都會讀成
- * 「有人鋪的」，而那正好是廢墟的反面。所以起伏跟土壤的分布都走平滑雜訊。
+ * 「有人鋪的」，而那正好是廢墟的反面。所以起伏跟土壤的分布都走雜訊。
+ *
+ * <p>而且是 {@link Noise} 的梯度雜訊、多八度、加定義域扭曲，不是單一波長的值雜訊——
+ * 後者的極值排在晶格上，遠看等高線是一格一格的橢圓，週期藏不住。
  *
  * <h2>土壤跟著低處走</h2>
  * <p>侵蝕值會**被高程壓低**：高的地方岩石裸露，低的地方積土積草。這是這片地看起來像自然
@@ -32,13 +35,14 @@ public final class Ground {
     /**
      * 四道門檻，切出岩盤 → 碎石 → 粗泥 → 泥土 → 草地。
      *
-     * <p>刻意讓草是**最窄的一段**。雜訊接近常態分布，門檻愈高的區間愈稀有，所以草只會出現在
-     * 侵蝕最徹底的核心。反過來調的話會變成綠地佔領整片地——那是草原，不是廢墟。
+     * <p>目標是**裸露的硬地兩成、土壤與草地八成**。雜訊接近常態分布，所以門檻的位置跟
+     * 佔比不是線性關係：這四個數字是從實際生成出來的世界量回來的，不是算出來的。
+     * 改動之後要重新量，見 {@code peek.py} 的 surface composition。
      */
-    private static final float BARE = 0.52f;
-    private static final float RUBBLE = 0.62f;
-    private static final float BARREN = 0.70f;
-    private static final float SOIL = 0.77f;
+    private static final float BARE = 0.371f;
+    private static final float RUBBLE = 0.407f;
+    private static final float BARREN = 0.478f;
+    private static final float SOIL = 0.569f;
 
     /**
      * 裸岩的配方。
@@ -63,9 +67,19 @@ public final class Ground {
      * 起伏是要讓建築有東西可以坐，不是要跟建築搶戲。
      */
     public static int height(int wx, int wz, Settings s, int salt) {
-        float n = 0.68f * value(wx, wz, 71, salt ^ 0x11)
-                + 0.32f * value(wx, wz, 29, salt ^ 0x27);
-        return s.ground() + Math.round((n - 0.5f) * 2f * s.relief());
+        // 起伏的**強度**自己也是一塊雜訊：有些地方近乎平坦，有些地方皺得厲害。
+        // 少了這一層，整片地會是同一個粗糙度的丘陵，那本身就是一種規律。
+        // 原版是用 erosion 這條參數做同一件事
+        float rough = Noise.fbm(wx, wz, 260f, 2, salt ^ 0x4D2);
+        float amp = s.relief() * (0.30f + 1.5f * rough * rough);
+
+        float n = Noise.warped(wx, wz, 84f, 4, salt ^ 0x11, 40f);
+        return s.ground() + Math.round((n - 0.5f) * 2f * amp);
+    }
+
+    /** 地形可能到達的最高點，出生點要靠它。跟 {@link #height} 的振幅上限對齊。 */
+    public static int ceiling(Settings s) {
+        return s.ground() + Math.round(s.relief() * 1.8f) + 1;
     }
 
     /**
@@ -93,10 +107,10 @@ public final class Ground {
         if (n < RUBBLE) return null;
 
         int roll = Math.floorMod(Masonry.hash(wx, salt ^ 0x5EED, wz), 100);
-        if (n < BARREN) return roll < 7 ? DEAD_BUSH : null;           // 粗泥：只有枯枝
-        if (n < SOIL) return roll < 6 ? DEAD_BUSH : (roll < 16 ? SHORT_GRASS : null);
+        if (n < BARREN) return roll < 5 ? DEAD_BUSH : null;           // 粗泥：只有枯枝
+        if (n < SOIL) return roll < 6 ? DEAD_BUSH : (roll < 14 ? SHORT_GRASS : null);
         if (roll < 5) return DEAD_BUSH;
-        return roll < 34 ? SHORT_GRASS : null;
+        return roll < 22 ? SHORT_GRASS : null;
     }
 
     /**
@@ -109,7 +123,9 @@ public final class Ground {
      */
     public static BlockState below(int wx, int wz, int depth, int surfaceY, int y, Settings s, int salt) {
         float n = erosion(wx, wz, surfaceY, s, salt);
-        if (n >= BARE && depth <= (int) ((n - BARE) * 20)) return DIRT;
+        // 土層厚度從**碎石線**起算，不是從裸岩線。從裸岩線起算的話，門檻一往下調，
+        // 連光禿的岩盤底下都會鋪一層土
+        if (n >= RUBBLE && depth <= (int) ((n - RUBBLE) * 16)) return DIRT;
         // 地表以下八格開始轉成板岩系，跟原版「愈深愈是深板岩」的直覺一致
         return (depth > 8 ? DEEP : ROCK).at(wx, y, wz);
     }
@@ -121,37 +137,8 @@ public final class Ground {
      * （0.012）是刻意的——要的是傾向，不是硬把地形切成上下兩層。
      */
     private static float erosion(int wx, int wz, int surfaceY, Settings s, int salt) {
-        float n = 0.65f * value(wx, wz, 37, salt) + 0.35f * value(wx, wz, 13, salt ^ 0x9E37);
+        float n = Noise.warped(wx, wz, 46f, 4, salt ^ 0x27, 26f);
         return n - (surfaceY - s.ground()) * 0.012f;
     }
 
-    /**
-     * 平滑的值雜訊。
-     *
-     * <p>自己寫而不是用 {@code NormalNoise}：那個要先在 registry 裡註冊一組噪聲參數，
-     * 而這裡只需要一塊會起伏的斑。用 smoothstep 內插晶格上的隨機值就夠了，
-     * 而且跟這個模組其他地方一樣，只吃座標。
-     */
-    private static float value(int x, int z, int scale, int salt) {
-        int gx = Math.floorDiv(x, scale);
-        int gz = Math.floorDiv(z, scale);
-        float fx = smooth((x - gx * scale) / (float) scale);
-        float fz = smooth((z - gz * scale) / (float) scale);
-
-        float a = lattice(gx, gz, salt);
-        float b = lattice(gx + 1, gz, salt);
-        float c = lattice(gx, gz + 1, salt);
-        float d = lattice(gx + 1, gz + 1, salt);
-
-        return (a + (b - a) * fx) * (1 - fz) + (c + (d - c) * fx) * fz;
-    }
-
-    private static float lattice(int gx, int gz, int salt) {
-        return (Masonry.hash(gx, salt, gz) >>> 8) / (float) (1 << 24);
-    }
-
-    /** smoothstep：線性內插會在晶格線上留下看得見的折角。 */
-    private static float smooth(float t) {
-        return t * t * (3 - 2 * t);
-    }
 }
