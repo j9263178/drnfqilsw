@@ -160,6 +160,7 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
                 int wx = x0 + lx;
                 int wz = z0 + lz;
                 Channel dug = channelAt(random, wx, wz);
+                boolean paved = paved(random, wx, wz);
                 int top = Math.clamp(land(random, wx, wz, salt), floor + 1, roof);
 
                 put(chunk, ocean, surface, cursor, lx, floor, lz, BEDROCK);
@@ -167,7 +168,9 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
                     put(chunk, ocean, surface, cursor, lx, y, lz,
                             Ground.below(wx, wz, top - y, top, y, settings, salt));
                 }
-                boolean flooded = dug == null && top <= pond;
+                // 鋪面上不長草也不積水：廣場與月台的地面是後面才蓋上去的，而草長在
+                // 地面**上方**那一格，蓋不到——所以要在這裡就不要種
+                boolean flooded = dug == null && !paved && top <= pond;
                 put(chunk, ocean, surface, cursor, lx, top, lz,
                         dug != null ? dug.surface(wx, top, wz)
                                 : flooded ? BED : Ground.surface(wx, wz, top, settings, salt));
@@ -192,6 +195,8 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
 
                 // 草擺在量體之前，所以被量體壓到的那些會被蓋掉——但架空層底下的會留著，
                 // 那正好是野草最該長的地方
+                if (paved) continue;
+
                 BlockState plant = Ground.plant(wx, wz, top, settings, salt);
                 if (plant != null && top + 1 <= roof) {
                     put(chunk, ocean, surface, cursor, lx, top + 1, lz, plant);
@@ -408,6 +413,12 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
         int raw = Ground.height(wx, wz, settings, salt);
         Channel dug = channelAt(random, wx, wz);
         return dug == null ? raw : dug.floor(wx, wz, raw);
+    }
+
+    /** 這一柱歸廣場或總站的鋪面管嗎。 */
+    private boolean paved(RandomState random, int wx, int wz) {
+        Plot plot = plotCovering(random, wx, wz);
+        return plot != null && plot.precinctLevel(wx, wz) != Integer.MIN_VALUE;
     }
 
     /** 蓋住這一柱的渠道。兩軸都要問，交會處取挖得比較深的那一條。 */

@@ -197,8 +197,11 @@ public final class Precinct {
 
         if (band < platformWidth) {
             // 月台。負的高度是它面向溝那一側的側牆——不包的話溝壁是裸露的土
+            //
+            // **台面是平的**。原本兩側邊緣各立一圈緣石，本意是月台的黃線，實際效果是
+            // 中間那幾格讀成凹下去一格的溝，而且柱子被那一圈擋著只能從再上面一格開始長，
+            // 看起來就是沒接到地。月台跟軌道之間已經有三格落差，邊界不需要再標一次
             if (h <= 0 && h >= -TRENCH) return plot.skin(wx, wy, wz);
-            if (h == 1 && (band == 0 || band == platformWidth - 1)) return KERB;
             return roof(across, along, h, plot, wx, wy, wz);
         }
 
@@ -252,8 +255,9 @@ public final class Precinct {
 
         if (h == deck || h == deck + 1) return CANOPY;
 
-        // 柱。三格見方，不是一根一格的棍子——三十格高的獨立柱要看得出撐得住
-        if (h > 1 && h < deck && Math.floorMod(across, pitch) < 3
+        // 柱。從台面上**第一格**就開始長，不是第二格——差一格在三十格高的柱子上看起來
+        // 就是浮著的。三格見方，不是一根一格的棍子
+        if (h >= 1 && h < deck && Math.floorMod(across, pitch) < 3
                 && Math.floorMod(along, 15) < 3) {
             return plot.skin(wx, wy, wz);
         }
