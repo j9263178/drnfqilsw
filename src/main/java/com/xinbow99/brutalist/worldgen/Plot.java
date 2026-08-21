@@ -88,11 +88,15 @@ public final class Plot {
     private final int decaySalt;
     private final float decayAt;
 
+    /** {@link Form#ASSEMBLY} 的組成方塊，其他形狀是空陣列。 */
+    private final Box[] boxes;
+
     private Plot(int x0, int z0, int baseY, int width, int depth, int height, Form form,
                  int module, int floorHeight, int bandHeight, int setback,
                  int armGap, int armThickness, int plinth, int parapet,
                  boolean raw, int lift, int columnGap, int columnWidth,
-                 Masonry.Palette palette, int decayScale, int decaySalt, float decayAt) {
+                 Masonry.Palette palette, int decayScale, int decaySalt, float decayAt,
+                 Box[] boxes) {
         this.x0 = x0;
         this.z0 = z0;
         this.baseY = baseY;
@@ -116,6 +120,47 @@ public final class Plot {
         this.decayScale = decayScale;
         this.decaySalt = decaySalt;
         this.decayAt = decayAt;
+        this.boxes = boxes;
+    }
+
+    /**
+     * 組合體的一塊：局部座標的長方體，可以再斜切一刀。
+     *
+     * <p>{@code cut} 的每一種都只是一個線性不等式，所以「斜面」不需要任何三角函數，
+     * 也不會在區塊邊界上出現半格的誤差。
+     */
+    public record Box(int u0, int v0, int h0, int u1, int v1, int h1, int cut) {
+
+        static final int NONE = 0;
+        static final int RISE_U = 1;      // 沿 +u 爬升的斜面
+        static final int RISE_NU = 2;
+        static final int RISE_V = 3;
+        static final int RISE_NV = 4;
+        static final int BATTER = 5;      // 四面同時往上收，一座平頂的方錐
+
+        boolean has(int u, int v, int h) {
+            if (u < u0 || u > u1 || v < v0 || v > v1 || h < h0 || h > h1) return false;
+
+            int du = u1 - u0;
+            int dv = v1 - v0;
+            int dh = h1 - h0;
+            if (dh <= 0) return true;
+
+            return switch (cut) {
+                // 交叉相乘代替除法：((h-h0)/dh) <= ((u-u0)/du)
+                case RISE_U -> (long) (h - h0) * du <= (long) (u - u0) * dh;
+                case RISE_NU -> (long) (h - h0) * du <= (long) (u1 - u) * dh;
+                case RISE_V -> (long) (h - h0) * dv <= (long) (v - v0) * dh;
+                case RISE_NV -> (long) (h - h0) * dv <= (long) (v1 - v) * dh;
+                case BATTER -> {
+                    int shrink = Math.min(du, dv) / 3;
+                    int inset = shrink * (h - h0) / dh;
+                    yield u - u0 >= inset && u1 - u >= inset
+                            && v - v0 >= inset && v1 - v >= inset;
+                }
+                default -> true;
+            };
+        }
     }
 
     /** 問「這一柱的地面在哪個高度」。由生成器接到 {@link Ground#height} 上。 */
@@ -183,6 +228,9 @@ public final class Plot {
         int module = 6 + build.nextInt(9);
         int lift = build.nextInt(4) == 0 ? 8 + build.nextInt(10) : 0;
         Masonry.Palette palette = Masonry.roll(build);
+        Box[] boxes = form == Form.ASSEMBLY
+                ? rollBoxes(build, width, depth, height)
+                : NO_BOXES;
 
         return new Plot(
                 x0, z0,
@@ -200,7 +248,68 @@ public final class Plot {
                 palette,
                 12 + build.nextInt(9),
                 build.nextInt(),
-                0.76f + build.nextFloat() * 0.10f);
+                0.76f + build.nextFloat() * 0.10f,
+                boxes);
+    }
+
+    private static final Box[] NO_BOXES = new Box[0];
+
+    /**
+     * 擲一組組合體。
+     *
+     * <h3>兩種完全不同的結果</h3>
+     * <p>四分之一的機率是**一整塊斜切的巨石**——整棟樓就是一個斜面，什麼都不做。
+     * 這種最接近 Niemeyer 那類把一片混凝土直接插進地裡的東西，而它需要的正是「沒有細節」。
+     *
+     * <p>其餘是**一座基座上長出好幾根**：先鋪一塊佔滿平面的低基座，再往上疊。
+     * 基座不是造型，是**結構保證**——沒有它，後面每一塊都得自己證明底下有東西撐，
+     * 而那個檢查在純函數裡做不到（它會變成互相參照）。
+     *
+     * <h3>為什麼疊上去的那些要咬住前一塊</h3>
+     * <p>離地起算的方塊如果隨機擺，會擲出浮在空中的量體。讓它在平面上壓住前一塊，
+     * 它就一定接得到地面——代價是形體會沿著一條鏈往一個方向長，而那剛好就是想要的懸挑。
+     */
+    private static Box[] rollBoxes(RandomSource r, int width, int depth, int height) {
+        if (r.nextInt(4) == 0) {
+            return new Box[]{new Box(0, 0, 0, width - 1, depth - 1, height - 1, 1 + r.nextInt(5))};
+        }
+
+        int n = 3 + r.nextInt(4);
+        Box[] boxes = new Box[n];
+
+        int baseH = Math.max(6, height / (4 + r.nextInt(4)));
+        boxes[0] = new Box(0, 0, 0, width - 1, depth - 1, baseH,
+                r.nextInt(5) == 0 ? Box.BATTER : Box.NONE);
+
+        for (int i = 1; i < n; i++) {
+            int w = Math.max(8, width * (30 + r.nextInt(35)) / 100);
+            int d = Math.max(8, depth * (30 + r.nextInt(35)) / 100);
+
+            int u0;
+            int v0;
+            int h0;
+            if (i == 1 || r.nextInt(2) == 0) {
+                u0 = r.nextInt(Math.max(1, width - w));
+                v0 = r.nextInt(Math.max(1, depth - d));
+                h0 = 0;
+            } else {
+                // 咬住前一塊：起點落在它的平面範圍內，偏移量最多半塊，挑出去的那半塊就是懸挑
+                Box on = boxes[i - 1];
+                u0 = clamp(on.u0() + r.nextInt(Math.max(1, on.u1() - on.u0())) - w / 2, width - w);
+                v0 = clamp(on.v0() + r.nextInt(Math.max(1, on.v1() - on.v0())) - d / 2, depth - d);
+                h0 = Math.min(on.h1(), on.h0() + Math.max(4, (on.h1() - on.h0()) * (40 + r.nextInt(60)) / 100));
+            }
+
+            h0 = Math.min(h0, Math.max(0, height - 12));     // 留得下一塊有意義的高度
+            int h1 = Math.min(height - 1, h0 + Math.max(10, height * (25 + r.nextInt(70)) / 100));
+            boxes[i] = new Box(u0, v0, h0, u0 + w - 1, v0 + d - 1, h1,
+                    r.nextInt(3) == 0 ? 1 + r.nextInt(5) : Box.NONE);
+        }
+        return boxes;
+    }
+
+    private static int clamp(int value, int max) {
+        return Math.max(0, Math.min(Math.max(0, max), value));
     }
 
     /**
@@ -355,13 +464,23 @@ public final class Plot {
     int armThickness() { return armThickness; }
     int plinth() { return plinth; }
 
+    Box[] boxes() { return boxes; }
+
+    /**
+     * <p>組合體佔了將近三成，是單一形狀裡最多的一種——因為它其實不是一種形狀，而是一個
+     * 形狀的**家族**，同樣的權重下它給出的變化比其他五種加起來還多。
+     *
+     * <p>其他幾種沒有被壓縮太多：單純的量體本身是好的，一整片都是複雜的組合體，
+     * 複雜就變成新的均質。
+     */
     private static Form pickForm(RandomSource r) {
         int roll = r.nextInt(100);
-        if (roll < 30) return Form.SLAB;
-        if (roll < 48) return Form.ZIGGURAT;
-        if (roll < 64) return Form.INVERTED;
-        if (roll < 80) return Form.CROSS;
-        if (roll < 90) return Form.PERFORATED;
+        if (roll < 28) return Form.ASSEMBLY;
+        if (roll < 48) return Form.SLAB;
+        if (roll < 60) return Form.ZIGGURAT;
+        if (roll < 72) return Form.INVERTED;
+        if (roll < 85) return Form.CROSS;
+        if (roll < 93) return Form.PERFORATED;
         return Form.CYLINDER;   // 圓筒最少，它的作用是打斷網格，多了就不特別了
     }
 
