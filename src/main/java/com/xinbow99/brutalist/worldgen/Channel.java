@@ -18,7 +18,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * <p>更重要的是它不是「加上去的方塊」而是**地形本身**：它改的是這一柱的地面高度，
  * 所以高度圖、柱體取樣、電塔的塔腳全都會自動跟著走。做成 Corridor 的話這些各要補一次。
  */
-public record Channel(boolean alongX, int centre, int half, int inner, int depth, int salt) {
+public record Channel(boolean alongX, int centre, int half, int inner, int depth, int bed, int salt) {
 
     /** 渠道的襯砌。固定一份，它是一次工程澆出來的。 */
     private static final Masonry.Palette LINING = new Masonry.Palette(
@@ -40,8 +40,9 @@ public record Channel(boolean alongX, int centre, int half, int inner, int depth
         if (r.nextInt(100) >= 24) return null;
 
         int half = Math.max(5, Math.min(s.street(), 8 + r.nextInt(3)));
+        int depth = 6 + r.nextInt(6);
         return new Channel(alongX, lineIndex * s.cell(), half,
-                Math.max(2, half - 3 - r.nextInt(2)), 6 + r.nextInt(6), salt);
+                Math.max(2, half - 3 - r.nextInt(2)), depth, s.ground() - depth, salt);
     }
 
     public boolean covers(int wx, int wz) {
@@ -68,16 +69,27 @@ public record Channel(boolean alongX, int centre, int half, int inner, int depth
         return LINING.at(wx, wy, wz);
     }
 
+    /** {@link #waterY} 用來表示這一段是乾的。 */
+    public static final int DRY = Integer.MIN_VALUE;
+
+    public static BlockState water() {
+        return WATER;
+    }
+
     /**
-     * 渠底那條水，{@code null} ＝ 這一段是乾的。
+     * 這一段的水面**絕對高度**，{@link #DRY} ＝ 乾的。
      *
-     * <p>用沿線的低頻雜訊決定乾濕，所以乾的是**連續的一整段**而不是一格一格的水窪。
-     * 全線有水就變成運河了，而廢棄的排水渠大半時候是乾的。
+     * <p>原本是「渠底往上一格放水」。渠底跟著地形起伏，於是水面也跟著起伏——那不是水面，
+     * 是一層沿著地形貼上去的藍色的漆，遠看是一階一階的。
+     *
+     * <p>水面必須是**水平的**，所以它是一個絕對高度，每 56 格一段、段內固定。渠底低於它的
+     * 地方就積水，高於它的地方就是乾的——一條廢棄的排水渠本來就是這樣：一窪一窪的積水，
+     * 中間隔著乾的段落。
      */
-    public BlockState water(int wx, int wz) {
-        int o = Math.abs((alongX ? wz : wx) - centre);
-        if (o > Math.max(2, inner - 2)) return null;
+    public int waterY(int wx, int wz) {
         int t = alongX ? wx : wz;
-        return Masonry.grain(t, 0, 0, 48, 48, salt ^ 0x5EA) > 0.52f ? WATER : null;
+        int k = Math.floorDiv(t, 56);
+        if (Masonry.grain(k, 0, 0, 3, 3, salt ^ 0x5EA) <= 0.46f) return DRY;
+        return bed + Math.round((Masonry.grain(k, 0, 0, 2, 2, salt ^ 0x77D) - 0.5f) * 6f);
     }
 }

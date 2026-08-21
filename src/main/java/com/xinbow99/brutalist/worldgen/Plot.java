@@ -98,12 +98,15 @@ public final class Plot {
     /** 屋頂設備。見 {@link Rooftop}。 */
     private final Rooftop roof;
 
+    /** 這一格不蓋樓時是什麼，{@code null} ＝ 就是一棟樓。見 {@link Precinct}。 */
+    private final Precinct precinct;
+
     private Plot(int x0, int z0, int baseY, int width, int depth, int height, Form form,
                  int module, int floorHeight, int bandHeight, int setback,
                  int armGap, int armThickness, int plinth, int parapet,
                  boolean raw, int lift, int columnGap, int columnWidth,
                  Masonry.Palette palette, int decayScale, int decaySalt, float decayAt,
-                 Box[] boxes, Stair stair, Rooftop roof) {
+                 Box[] boxes, Stair stair, Rooftop roof, Precinct precinct) {
         this.x0 = x0;
         this.z0 = z0;
         this.baseY = baseY;
@@ -130,6 +133,7 @@ public final class Plot {
         this.boxes = boxes;
         this.stair = stair;
         this.roof = roof;
+        this.precinct = precinct;
     }
 
     /**
@@ -205,12 +209,20 @@ public final class Plot {
 
         if (build.nextFloat() > s.density()) return null;
 
-        Form form = pickForm(build);
-
         int originX = (groupX * GROUP + piece.u()) * s.cell();
         int originZ = (groupZ * GROUP + piece.v()) * s.cell();
         int spanX = piece.w() * s.cell() - s.street() * 2;
         int spanZ = piece.d() * s.cell() - s.street() * 2;
+
+        // 少數幾格不蓋樓。整片都是三百格高的量體時，「高」會失去意義——
+        // 空出來的那一格是對照組
+        int use = build.nextInt(100);
+        if (use < 14) {
+            return open(build, use < 8 ? Precinct.PLAZA : Precinct.DEPOT,
+                    originX + s.street(), originZ + s.street(), spanX, spanZ, terrain);
+        }
+
+        Form form = pickForm(build);
 
         int width;
         int depth;
@@ -260,7 +272,32 @@ public final class Plot {
                 12 + build.nextInt(9),
                 build.nextInt(),
                 0.76f + build.nextFloat() * 0.10f,
-                boxes, stair, roof);
+                boxes, stair, roof, null);
+    }
+
+    /**
+     * 鋪面的一格：廣場或公車總站。
+     *
+     * <p>基準面取**整塊地裡最高的地形再加一格**，不是中心的高度。廣場是平的，坐在中心高度上
+     * 的話，地勢高的那一角會把它埋掉——而埋掉的鋪面看起來不是廣場，是一塊爛掉的地。
+     * 低的那幾角由基座往下補（見 {@link #footprintSolid}），那正好變成一座矮台基。
+     */
+    private static Plot open(RandomSource build, int kind, int x0, int z0,
+                             int width, int depth, Terrain terrain) {
+        int highest = Integer.MIN_VALUE;
+        for (int i = 0; i <= 12; i++) {
+            for (int j = 0; j <= 12; j++) {
+                highest = Math.max(highest,
+                        terrain.heightAt(x0 + width * i / 12, z0 + depth * j / 12));
+            }
+        }
+
+        Masonry.Palette palette = Masonry.roll(build);
+        Precinct precinct = Precinct.roll(build, kind, width, depth);
+        return new Plot(x0, z0, highest + 1, width, depth, precinct.top() + 1, Form.SLAB,
+                6, 5, 8, 3, 26, 12, 4, 2, true, 0, 12, 3,
+                palette, 16, build.nextInt(), 2f,
+                NO_BOXES, null, new Rooftop(new Rooftop.Item[0], 0, 0), precinct);
     }
 
     /**
@@ -402,6 +439,8 @@ public final class Plot {
         int v = wz - z0;
         int h = wy - baseY;
 
+        if (precinct != null) return precinct.blockAt(u, v, h, this, wx, wy, wz);
+
         BlockState mass = massAt(u, v, h, wx, wy, wz);
         if (mass != null) return mass;
 
@@ -480,7 +519,9 @@ public final class Plot {
      * 架空層的基座才會只在柱子底下——那正好是柱子該落地的地方。
      */
     public boolean footprintSolid(int wx, int wz) {
-        return solid(wx - x0, wz - z0, 0);
+        int u = wx - x0;
+        int v = wz - z0;
+        return precinct != null ? precinct.covers(u, v) : solid(u, v, 0);
     }
 
     /**
@@ -546,7 +587,9 @@ public final class Plot {
     public int minY() { return baseY; }
 
     /** **含屋頂設備**：不加上去的話區塊填充掃不到桅杆與水塔那一段。 */
-    public int maxY() { return baseY + height - 1 + roof.top(); }
+    public int maxY() {
+        return precinct != null ? baseY + precinct.top() : baseY + height - 1 + roof.top();
+    }
 
     int width() { return width; }
     int depth() { return depth; }
@@ -559,6 +602,11 @@ public final class Plot {
     int plinth() { return plinth; }
 
     Box[] boxes() { return boxes; }
+
+    Masonry.Palette palette() { return palette; }
+
+    /** 這一格是廣場或總站嗎。 */
+    public Precinct precinct() { return precinct; }
 
     /**
      * <p>組合體佔了將近三成，是單一形狀裡最多的一種——因為它其實不是一種形狀，而是一個

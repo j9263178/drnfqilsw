@@ -53,6 +53,7 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
     private static final Identifier GROUND = Identifier.parse("brutalist:ground");
     private static final Identifier LINES = Identifier.parse("brutalist:corridors");
     private static final Identifier SPANS = Identifier.parse("brutalist:bridges");
+    private static final Identifier STREET = Identifier.parse("brutalist:shelters");
 
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     private static final BlockState BEDROCK = Blocks.BEDROCK.defaultBlockState();
@@ -82,6 +83,12 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
 
     /** 超級街廓 → 組內的天橋。 */
     private final ConcurrentHashMap<Long, List<Span>> bridges = new ConcurrentHashMap<>();
+
+    /** 候車亭的散佈網格 → 那一格上的那一座。 */
+    private final ConcurrentHashMap<Long, Optional<Shelter>> shelters = new ConcurrentHashMap<>();
+
+    /** 候車亭散佈網格的邊長。比街廓小得多，它們不歸任何一格街廓管。 */
+    private static final int SCATTER = 64;
 
     /** 一條天橋，連同它要用誰的石材。 */
     private record Span(Bridge bridge, Plot skin) {
@@ -166,10 +173,10 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
                                 : flooded ? BED : Ground.surface(wx, wz, top, settings, salt));
 
                 if (dug != null) {
-                    // 渠底那條水只有一格深，走得進去
-                    BlockState trickle = dug.water(wx, wz);
-                    if (trickle != null && top + 1 <= roof) {
-                        put(chunk, ocean, surface, cursor, lx, top + 1, lz, trickle);
+                    // 渠底低於水面的那些地方積水。水面是絕對高度，所以每一窪都是平的
+                    int wet = Math.min(dug.waterY(wx, wz), roof);
+                    for (int y = top + 1; y <= wet; y++) {
+                        put(chunk, ocean, surface, cursor, lx, y, lz, Channel.water());
                     }
                     continue;
                 }
@@ -214,6 +221,28 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
                     }
                     for (int wy = ay; wy <= by; wy++) {
                         BlockState state = plot.blockAt(wx, wy, wz);
+                        if (state != null) {
+                            put(chunk, ocean, surface, cursor, wx - x0, wy, wz - z0, state);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 候車亭。放在量體之後、天橋之前：它跟量體本來就不重疊（見 shelterAt 的排除），
+        // 但萬一參數被調到重疊，讓量體贏比較好理解
+        for (Shelter shed : street(random, x0, z0)) {
+            for (int wx = Math.max(x0, shed.minX()); wx <= Math.min(x0 + 15, shed.maxX()); wx++) {
+                for (int wz = Math.max(z0, shed.minZ()); wz <= Math.min(z0 + 15, shed.maxZ()); wz++) {
+                    if (shed.covers(wx, wz)) {
+                        int under = land(random, wx, wz, salt);
+                        for (int wy = Math.max(floor, under + 1); wy < shed.baseY(); wy++) {
+                            put(chunk, ocean, surface, cursor, wx - x0, wy, wz - z0,
+                                    shed.palette().at(wx, wy, wz));
+                        }
+                    }
+                    for (int wy = Math.max(floor, shed.baseY()); wy <= Math.min(roof, shed.maxY()); wy++) {
+                        BlockState state = shed.blockAt(wx, wy, wz);
                         if (state != null) {
                             put(chunk, ocean, surface, cursor, wx - x0, wy, wz - z0, state);
                         }
@@ -308,6 +337,58 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
         }
         bridges.put(key, rolled);
         return rolled;
+    }
+
+    /** 碰得到這個區塊的候車亭。往外多看一格網格，大的那種會伸出格外。 */
+    private List<Shelter> street(RandomState random, int x0, int z0) {
+        List<Shelter> found = new ArrayList<>(2);
+        for (int gx = Math.floorDiv(x0, SCATTER) - 1; gx <= Math.floorDiv(x0 + 15, SCATTER); gx++) {
+            for (int gz = Math.floorDiv(z0, SCATTER) - 1; gz <= Math.floorDiv(z0 + 15, SCATTER); gz++) {
+                Shelter shed = shelter(random, gx, gz);
+                if (shed != null && shed.maxX() >= x0 && shed.minX() <= x0 + 15
+                        && shed.maxZ() >= z0 && shed.minZ() <= z0 + 15) {
+                    found.add(shed);
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
+     * 散佈網格上的一座候車亭。
+     *
+     * <p>擲完之後要**排除掉落在量體或基礎設施上**的。這是整份程式碼裡唯一一處真正的碰撞
+     * 檢查——其他東西都是用擺放規則把重疊消掉的，但候車亭是散在街上的，街上有什麼
+     * 事先不知道，只能問。好在問一次就夠：量體與走廊都是純函數，答案不會變。
+     */
+    private Shelter shelter(RandomState random, int gx, int gz) {
+        long key = ((long) gx << 32) | (gz & 0xFFFFFFFFL);
+        Optional<Shelter> cached = shelters.get(key);
+        if (cached != null) return cached.orElse(null);
+
+        if (shelters.size() > 4096) shelters.clear();
+        int salt = groundSalt(random);
+        Shelter rolled = Shelter.roll(
+                random.getOrCreateRandomFactory(STREET).at(gx, 3, gz), gx, gz, SCATTER,
+                (wx, wz) -> land(random, wx, wz, salt));
+
+        if (rolled != null && !clear(random, rolled)) rolled = null;
+        shelters.put(key, Optional.ofNullable(rolled));
+        return rolled;
+    }
+
+    /** 這座候車亭腳下是不是空地。 */
+    private boolean clear(RandomState random, Shelter shed) {
+        int line = settings.cell() * Plot.GROUP;
+        for (int wx = shed.minX(); wx <= shed.maxX(); wx += 4) {
+            for (int wz = shed.minZ(); wz <= shed.maxZ(); wz += 4) {
+                if (plotCovering(random, wx, wz) != null) return false;
+                // 走廊與排水渠佔掉邊界線兩側各十幾格，那裡不放
+                if (Math.abs(wx - Math.round(wx / (float) line) * line) <= 13) return false;
+                if (Math.abs(wz - Math.round(wz / (float) line) * line) <= 13) return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -544,8 +625,13 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
     @Override
     public void addDebugScreenInfo(List<String> lines, RandomState random, BlockPos pos) {
         Plot plot = plotCovering(random, pos.getX(), pos.getZ());
-        lines.add(plot == null
-                ? "Brutalist: 廣場"
-                : "Brutalist: 量體 " + plot.width() + "x" + plot.depth() + "x" + plot.height());
+        if (plot == null) {
+            lines.add("Brutalist: 街道");
+        } else if (plot.precinct() != null) {
+            lines.add("Brutalist: " + (plot.precinct().kind() == Precinct.PLAZA ? "廣場" : "公車總站")
+                    + " " + plot.width() + "x" + plot.depth());
+        } else {
+            lines.add("Brutalist: 量體 " + plot.width() + "x" + plot.depth() + "x" + plot.height());
+        }
     }
 }

@@ -76,6 +76,17 @@ public final class Folly {
      */
     static BlockState at(int dt, int o, int h, int reach, int height, int salt,
                          int wx, int wy, int wz) {
+        return at(dt, o, h, reach, height, salt, palette(salt), wx, wy, wz);
+    }
+
+    /**
+     * 指定石材的版本。
+     *
+     * <p>{@link Precinct} 的雕像要用**那一格自己的**配方，而不是裝置物那三份固定的——
+     * 廣場跟它周圍的樓是同一批混凝土澆的，雕像也該是。
+     */
+    static BlockState at(int dt, int o, int h, int reach, int height, int salt,
+                         Masonry.Palette palette, int wx, int wy, int wz) {
         if (h < 0 || h > height) return null;
         if (Math.abs(dt) > reach || Math.abs(o) > reach) return null;
 
@@ -87,7 +98,7 @@ public final class Folly {
             case STACK -> stack(dt, o, h, reach, height, salt);
             default -> lean(dt, o, h, reach, height);
         };
-        return solid ? palette(salt).at(wx, wy, wz) : null;
+        return solid ? palette.at(wx, wy, wz) : null;
     }
 
     /**
