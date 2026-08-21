@@ -95,12 +95,15 @@ public final class Plot {
     /** 外掛的室外樓梯，{@code null} ＝ 這棟沒有。 */
     private final Stair stair;
 
+    /** 屋頂設備。見 {@link Rooftop}。 */
+    private final Rooftop roof;
+
     private Plot(int x0, int z0, int baseY, int width, int depth, int height, Form form,
                  int module, int floorHeight, int bandHeight, int setback,
                  int armGap, int armThickness, int plinth, int parapet,
                  boolean raw, int lift, int columnGap, int columnWidth,
                  Masonry.Palette palette, int decayScale, int decaySalt, float decayAt,
-                 Box[] boxes, Stair stair) {
+                 Box[] boxes, Stair stair, Rooftop roof) {
         this.x0 = x0;
         this.z0 = z0;
         this.baseY = baseY;
@@ -126,6 +129,7 @@ public final class Plot {
         this.decayAt = decayAt;
         this.boxes = boxes;
         this.stair = stair;
+        this.roof = roof;
     }
 
     /**
@@ -237,6 +241,7 @@ public final class Plot {
                 ? rollBoxes(build, width, depth, height)
                 : NO_BOXES;
         Stair stair = rollStair(build, form, width, depth, s.street());
+        Rooftop roof = Rooftop.roll(build, width, depth);
 
         return new Plot(
                 x0, z0,
@@ -255,7 +260,7 @@ public final class Plot {
                 12 + build.nextInt(9),
                 build.nextInt(),
                 0.76f + build.nextFloat() * 0.10f,
-                boxes, stair);
+                boxes, stair, roof);
     }
 
     /**
@@ -399,6 +404,16 @@ public final class Plot {
 
         BlockState mass = massAt(u, v, h, wx, wy, wz);
         if (mass != null) return mass;
+
+        // 屋頂設備只長在「最上面那一層是實心」的地方。一次判斷對所有形狀都成立：
+        // 板樓長滿整片、梯形只長在最高那個退縮平台、圓筒長成一個圓
+        if (h >= height && h < height + roof.top()
+                && u >= 0 && v >= 0 && u < width && v < depth
+                && solid(u, v, height - 1)) {
+            BlockState top = roof.blockAt(u, v, h - height, width, depth, this, wx, wy, wz);
+            if (top != null) return top;
+        }
+
         return stair == null ? null : stairAt(u, v, h, wx, wy, wz);
     }
 
@@ -529,7 +544,9 @@ public final class Plot {
         return stair != null && stair.face() == face ? stair.reach() : 0;
     }
     public int minY() { return baseY; }
-    public int maxY() { return baseY + height - 1; }
+
+    /** **含屋頂設備**：不加上去的話區塊填充掃不到桅杆與水塔那一段。 */
+    public int maxY() { return baseY + height - 1 + roof.top(); }
 
     int width() { return width; }
     int depth() { return depth; }

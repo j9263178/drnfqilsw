@@ -23,7 +23,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
  */
 public final class Corridor {
 
-    public enum Kind {VIADUCT, POWER, FOLLY}
+    public enum Kind {VIADUCT, POWER, FOLLY, PIPE}
 
     /**
      * 塔身。
@@ -35,6 +35,24 @@ public final class Corridor {
     private static final BlockState STEEL = Blocks.SMOOTH_STONE.defaultBlockState();
     private static final BlockState WIRE = Blocks.IRON_CHAIN.defaultBlockState();
     private static final BlockState FOOTING = Blocks.CRACKED_STONE_BRICKS.defaultBlockState();
+
+    /**
+     * 管線的灰階。
+     *
+     * <p>三階明度而不是三種顏色：一束管子並排的時候，眼睛是靠**明暗**分辨哪根是哪根的，
+     * 換成彩色反而會讀成塑膠。灰綠的凝灰岩偶爾摻一根，當作換過的舊管。
+     */
+    private static final BlockState[] PIPE_GREY = {
+            Blocks.POLISHED_ANDESITE.defaultBlockState(),
+            Blocks.SMOOTH_STONE.defaultBlockState(),
+            Blocks.POLISHED_DEEPSLATE.defaultBlockState(),
+            Blocks.POLISHED_TUFF.defaultBlockState(),
+    };
+
+    /** 法蘭環取比管身暗一階，環才讀得出來。深的那階就往回繞到最亮的。 */
+    private static final BlockState[] PIPE_FLANGE = {
+            PIPE_GREY[2], PIPE_GREY[2], PIPE_GREY[0], PIPE_GREY[2],
+    };
 
     /** 高架與電塔基座的石材。固定一份：它們是同一批工程蓋的。 */
     private static final Masonry.Palette CONCRETE = new Masonry.Palette(
@@ -58,9 +76,26 @@ public final class Corridor {
     private final int pylonHeight;
     private final int armReach;
 
+    // ---- 管線
+    private final int rackY;
+    private final Run[] runs;
+
+    /**
+     * 一根管。
+     *
+     * <p>{@code rise} 是相對於管架基準高度的層數位移——管子要**筆直**，所以它的軸線是絕對高度，
+     * 不跟著地形走；跟著地形起伏的是管架的腳。真實的管廊就是這樣，也是它看起來像工程
+     * 而不像地景的原因。
+     */
+    private record Run(int off, int rise, int radius, int material, boolean hollow) {
+    }
+
+    private static final Run[] NO_RUNS = new Run[0];
+
     private Corridor(Kind kind, boolean alongX, int centre, int half, int salt,
                      int deckY, int pierGap, int pierPhase,
-                     int spacing, int phase, int pylonHeight, int armReach) {
+                     int spacing, int phase, int pylonHeight, int armReach,
+                     int rackY, Run[] runs) {
         this.kind = kind;
         this.alongX = alongX;
         this.centre = centre;
@@ -73,6 +108,8 @@ public final class Corridor {
         this.phase = phase;
         this.pylonHeight = pylonHeight;
         this.armReach = armReach;
+        this.rackY = rackY;
+        this.runs = runs;
     }
 
     /**
@@ -92,22 +129,61 @@ public final class Corridor {
 
         int roll = r.nextInt(100);
         Kind kind;
-        if (roll < 38) return null;
-        else if (roll < 64) kind = Kind.VIADUCT;
-        else if (roll < 78) kind = Kind.POWER;
-        else kind = Kind.FOLLY;
+        if (roll < 26) return null;
+        else if (roll < 48) kind = Kind.VIADUCT;
+        else if (roll < 62) kind = Kind.POWER;
+        else if (roll < 78) kind = Kind.FOLLY;
+        else kind = Kind.PIPE;
 
         int half = Math.max(3, Math.min(s.street(), 10));
         int centre = lineIndex * s.cell();
 
         // 裝置物之間要留得夠遠：連著擺就變成一排路燈，而它們要像是各自被丟在那裡的
         int spacing = kind == Kind.FOLLY ? 90 + r.nextInt(80) : 84 + r.nextInt(44);
+        int rackY = s.ground() + 9 + r.nextInt(8);
 
         return new Corridor(kind, alongX, centre, half, salt,
                 s.ground() + 24 + r.nextInt(22),
                 26 + r.nextInt(14), r.nextInt(64),
                 spacing, r.nextInt(64),
-                88 + r.nextInt(56), Math.max(4, half - 1));
+                88 + r.nextInt(56), Math.max(4, half - 1),
+                rackY, kind == Kind.PIPE ? rollRuns(r, half) : NO_RUNS);
+    }
+
+    /**
+     * 擲一束管。
+     *
+     * <p>粗細與明度都要混：一整束一樣粗的管子讀起來像百葉窗。分兩層是因為單層排開之後
+     * 這束管在側面只有一條線，兩層才有厚度。
+     *
+     * <p>偶爾整層換成一根**可以走進去的巨管**。那是這條管線唯一給玩家的東西，
+     * 所以它必須夠大到看得出是空心的——半徑四格以下鑽進去只會卡住。
+     */
+    private static Run[] rollRuns(RandomSource r, int half) {
+        int reach = half - 3;
+        if (r.nextInt(100) < 16) {
+            int radius = 4 + r.nextInt(2);
+            return new Run[]{new Run(0, radius, radius, r.nextInt(3), true)};
+        }
+
+        int count = 3 + r.nextInt(3);
+        Run[] runs = new Run[count];
+
+        // 位置**等距分配**，不是各自亂擲。亂擲出來的四根管子常常擠在一起，
+        // 剩下的架子空著——那讀起來不是管廊，是幾根忘了收的管子
+        int lower = (count + 1) / 2;
+        int upper = count - lower;
+        for (int i = 0; i < count; i++) {
+            boolean low = (i & 1) == 0;
+            int slots = low ? lower : upper;
+            int k = i / 2;
+            // 半徑受格數限制：兩根粗管擠在同一層會黏成一坨，中間看不出縫
+            int radius = Math.min(2 + r.nextInt(2), Math.max(1, reach / Math.max(1, slots) - 1));
+            int off = -reach + (2 * reach) * (2 * k + 1) / (2 * Math.max(1, slots));
+            runs[i] = new Run(off, low ? radius + 1 : radius + 10, radius,
+                    r.nextInt(100) < 14 ? 3 : r.nextInt(3), false);
+        }
+        return runs;
     }
 
     /** 這一柱在不在這條走廊的範圍內。 */
@@ -131,6 +207,7 @@ public final class Corridor {
             case VIADUCT -> deckY + DECK_SWING + 4;
             case POWER -> terrainY + pylonHeight + 14;
             case FOLLY -> terrainY + FOLLY_CEILING;
+            case PIPE -> rackY + 20;
         };
     }
 
@@ -152,6 +229,7 @@ public final class Corridor {
             case VIADUCT -> viaduct(t, o, wx, wy, wz, terrainY);
             case POWER -> power(t, o, wx, wy, wz, terrain);
             case FOLLY -> folly(t, o, wx, wy, wz, terrain);
+            case PIPE -> pipe(t, o, wx, wy, wz, terrainY);
         };
     }
 
@@ -278,6 +356,48 @@ public final class Corridor {
     /** 沿著線的低頻雜訊：連續好幾十格一起塌，而不是東缺一塊西缺一塊。 */
     private boolean collapsed(int t) {
         return Masonry.grain(t, 0, 0, 34, 34, salt ^ 0x60117) > 0.70f;
+    }
+
+    // ------------------------------------------------------------------ 管線
+
+    /**
+     * 管廊：一束粗細不同的管子，架在每隔一段一組的門型架上。
+     *
+     * <p>單根架高的管子看起來像鄉間的輸油管；讀得出「工業」的是**一整排並排**的密度與節奏。
+     */
+    private BlockState pipe(int t, int o, int wx, int wy, int wz, int terrainY) {
+        for (Run run : runs) {
+            BlockState state = tube(run, t, o, wy);
+            if (state != null) return state;
+        }
+        return frame(t, o, wy, terrainY);
+    }
+
+    private BlockState tube(Run run, int t, int o, int wy) {
+        int du = o - run.off();
+        int dv = wy - (rackY + run.rise());
+        int d2 = du * du + dv * dv;
+
+        // 法蘭：每隔一段套一圈大一號的環。真正讓它讀成「管」而不是「圓柱」的就是這一行
+        boolean flange = Math.floorMod(t, 16) < 2;
+        int r = run.radius() + (flange ? 1 : 0);
+        if (d2 > r * r) return null;
+        if (run.hollow() && d2 < (r - 1) * (r - 1)) return null;
+
+        return flange ? PIPE_FLANGE[run.material()] : PIPE_GREY[run.material()];
+    }
+
+    /** 門型架。腳跟著地形長短，管子則是絕對高度——所以架子高低不一，管線筆直。 */
+    private BlockState frame(int t, int o, int wy, int terrainY) {
+        if (Math.floorMod(t - pierPhase, Math.max(8, pierGap / 2)) >= 2) return null;
+        int leg = half - 2;
+        int crown = rackY + 14;
+        if (wy <= terrainY || wy > crown) return null;
+
+        if (Math.abs(o) == leg) return wy <= terrainY + 2 ? FOOTING : STEEL;
+        // 橫梁：兩層，剛好托在兩層管子下面
+        if (Math.abs(o) < leg && (wy == rackY - 2 || wy == rackY + 6 || wy == crown)) return STEEL;
+        return null;
     }
 
     // ------------------------------------------------------------------ 電塔
