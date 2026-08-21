@@ -1,5 +1,6 @@
 package com.xinbow99.brutalist;
 
+import com.xinbow99.brutalist.worldgen.BrutalistBiomeSource;
 import com.xinbow99.brutalist.worldgen.BrutalistChunkGenerator;
 import net.fabricmc.api.ModInitializer;
 import net.minecraft.core.Registry;
@@ -30,6 +31,13 @@ public class Brutalist implements ModInitializer {
                 BuiltInRegistries.CHUNK_GENERATOR,
                 Identifier.parse(MOD_ID + ":brutalist"),
                 BrutalistChunkGenerator.CODEC);
+
+        // BIOME_SOURCE 跟 CHUNK_GENERATOR 一樣不在同步清單裡：封包只帶生態系**本身**的 id，
+        // 不帶「是誰決定的」。生態系那份 registry 才是同步的，而那些是 JSON，客戶端收得到
+        Registry.register(
+                BuiltInRegistries.BIOME_SOURCE,
+                Identifier.parse(MOD_ID + ":brutalist"),
+                BrutalistBiomeSource.CODEC);
 
         LOGGER.info("Brutalist world type registered");
     }

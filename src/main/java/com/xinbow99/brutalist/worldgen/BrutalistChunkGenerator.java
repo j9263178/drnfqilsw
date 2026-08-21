@@ -55,6 +55,7 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
     private static final BlockState BEDROCK = Blocks.BEDROCK.defaultBlockState();
 
+
     private final Settings settings;
 
     /**
@@ -99,6 +100,21 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
     @Override
     protected MapCodec<? extends ChunkGenerator> codec() {
         return CODEC;
+    }
+
+    /**
+     * 生態系比方塊早算。
+     *
+     * <p>覆寫它只為了一件事：{@link BrutalistBiomeSource} 拿不到世界種子，得在**第一次被查
+     * 之前**把鹽交給它。放在 {@code fillFromNoise} 太晚——那時候生態系已經填完了。
+     */
+    @Override
+    public CompletableFuture<ChunkAccess> createBiomes(RandomState random, Blender blender,
+                                                       StructureManager structures, ChunkAccess chunk) {
+        if (getBiomeSource() instanceof BrutalistBiomeSource source) {
+            source.seed(groundSalt(random));
+        }
+        return super.createBiomes(random, blender, structures, chunk);
     }
 
     @Override

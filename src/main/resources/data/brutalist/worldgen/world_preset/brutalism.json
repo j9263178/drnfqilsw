@@ -5,8 +5,10 @@
       "generator": {
         "type": "brutalist:brutalist",
         "biome_source": {
-          "type": "minecraft:fixed",
-          "biome": "brutalist:concrete"
+          "type": "brutalist:brutalist",
+          "cold": "brutalist:concrete_cold",
+          "temperate": "brutalist:concrete",
+          "warm": "brutalist:concrete_warm"
         },
         "settings": {
           "cell": 160,
@@ -25,7 +27,10 @@
       "type": "minecraft:the_nether",
       "generator": {
         "type": "minecraft:noise",
-        "biome_source": { "type": "minecraft:multi_noise", "preset": "minecraft:nether" },
+        "biome_source": {
+          "type": "minecraft:multi_noise",
+          "preset": "minecraft:nether"
+        },
         "settings": "minecraft:nether"
       }
     },
@@ -33,7 +38,9 @@
       "type": "minecraft:the_end",
       "generator": {
         "type": "minecraft:noise",
-        "biome_source": { "type": "minecraft:the_end" },
+        "biome_source": {
+          "type": "minecraft:the_end"
+        },
         "settings": "minecraft:end"
       }
     }

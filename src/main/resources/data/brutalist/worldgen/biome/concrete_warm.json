@@ -1,12 +1,12 @@
 {
   "attributes": {
-    "minecraft:visual/sky_color": "#9aa3ad",
-    "minecraft:visual/fog_color": "#b9bcc2"
+    "minecraft:visual/sky_color": "#a9a291",
+    "minecraft:visual/fog_color": "#ccc4b2"
   },
   "carvers": [],
-  "downfall": 0.6,
+  "downfall": 0.25,
   "effects": {
-    "water_color": "#4a5560"
+    "water_color": "#586052"
   },
   "features": [
     [],
@@ -33,5 +33,5 @@
     "water_ambient": [],
     "water_creature": []
   },
-  "temperature": 0.7
+  "temperature": 1.1
 }
