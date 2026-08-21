@@ -44,7 +44,9 @@ public record Shelter(int x0, int z0, int baseY, boolean alongX,
      * @param gx 散佈網格的格號，跟街廓無關——候車亭是散在街上的，不歸任何一格街廓管
      */
     public static Shelter roll(RandomSource r, int gx, int gz, int step, Plot.Terrain terrain) {
-        if (r.nextInt(100) < 52) return null;
+        // 散佈網格是六十四格一格，所以這個機率直接就是密度。原本四成八，走幾步就一座，
+        // 候車亭於是變成一種路邊裝飾——它要成立，前提是它**難得出現一座**
+        if (r.nextInt(100) < 84) return null;
 
         boolean alongX = r.nextInt(2) == 0;
         int form = r.nextInt(5);
