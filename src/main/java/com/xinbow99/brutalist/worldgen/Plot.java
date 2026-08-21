@@ -91,12 +91,15 @@ public final class Plot {
     /** {@link Form#ASSEMBLY} 的組成方塊，其他形狀是空陣列。 */
     private final Box[] boxes;
 
+    /** 外掛的室外樓梯，{@code null} ＝ 這棟沒有。 */
+    private final Stair stair;
+
     private Plot(int x0, int z0, int baseY, int width, int depth, int height, Form form,
                  int module, int floorHeight, int bandHeight, int setback,
                  int armGap, int armThickness, int plinth, int parapet,
                  boolean raw, int lift, int columnGap, int columnWidth,
                  Masonry.Palette palette, int decayScale, int decaySalt, float decayAt,
-                 Box[] boxes) {
+                 Box[] boxes, Stair stair) {
         this.x0 = x0;
         this.z0 = z0;
         this.baseY = baseY;
@@ -121,6 +124,7 @@ public final class Plot {
         this.decaySalt = decaySalt;
         this.decayAt = decayAt;
         this.boxes = boxes;
+        this.stair = stair;
     }
 
     /**
@@ -231,6 +235,7 @@ public final class Plot {
         Box[] boxes = form == Form.ASSEMBLY
                 ? rollBoxes(build, width, depth, height)
                 : NO_BOXES;
+        Stair stair = rollStair(build, form, width, depth);
 
         return new Plot(
                 x0, z0,
@@ -249,7 +254,28 @@ public final class Plot {
                 12 + build.nextInt(9),
                 build.nextInt(),
                 0.76f + build.nextFloat() * 0.10f,
-                boxes);
+                boxes, stair);
+    }
+
+    /**
+     * 擲一座外掛樓梯。
+     *
+     * <p>只掛在**牆面是垂直的**形狀上。梯形、倒梯形、圓筒的牆會隨高度往內或往外移動，
+     * 樓梯要嘛跟著歪掉（它是折返梯，歪了就不是折返梯），要嘛爬到一半離開牆面飄在空中。
+     * 兩種都比沒有樓梯難看，所以這裡用擺放規則把問題消掉，而不是想辦法讓樓梯貼著曲面走。
+     */
+    private static Stair rollStair(RandomSource r, Form form, int width, int depth) {
+        if (form != Form.SLAB && form != Form.PERFORATED && form != Form.CROSS) return null;
+        if (r.nextInt(100) >= 45) return null;
+
+        int flight = 6 + r.nextInt(3);
+        int run = flight + 1;
+        int face = r.nextInt(4);
+        int span = face < 2 ? width : depth;
+        if (span < run + 2) return null;
+
+        return new Stair(face, r.nextInt(span - run + 1), 4 + r.nextInt(2),
+                flight, r.nextInt(3), r.nextInt());
     }
 
     private static final Box[] NO_BOXES = new Box[0];
@@ -365,6 +391,30 @@ public final class Plot {
         int u = wx - x0;
         int v = wz - z0;
         int h = wy - baseY;
+
+        BlockState mass = massAt(u, v, h, wx, wy, wz);
+        if (mass != null) return mass;
+        return stair == null ? null : stairAt(u, v, h, wx, wy, wz);
+    }
+
+    /**
+     * 把世界座標換成樓梯自己的三個數字：沿牆走多遠、離牆多遠、離底多高。
+     *
+     * <p>四個面的差別全部收在這個 switch 裡，{@link Stair} 那邊一個面都不必知道。
+     */
+    private BlockState stairAt(int u, int v, int h, int wx, int wy, int wz) {
+        int a;
+        int b;
+        switch (stair.face()) {
+            case 0 -> { a = u; b = -v; }                    // 北面
+            case 1 -> { a = u; b = v - (depth - 1); }       // 南面
+            case 2 -> { a = v; b = -u; }                    // 西面
+            default -> { a = v; b = u - (width - 1); }      // 東面
+        }
+        return stair.at(a - stair.along(), b, h, height - 1, this, wx, wy, wz);
+    }
+
+    private BlockState massAt(int u, int v, int h, int wx, int wy, int wz) {
         if (!solid(u, v, h)) return null;
         if (carved(u, v, h)) return null;
 
@@ -447,10 +497,21 @@ public final class Plot {
                 || !solid(u, v - 3, h) || !solid(u, v + 3, h);
     }
 
-    public int minX() { return x0; }
-    public int minZ() { return z0; }
-    public int maxX() { return x0 + width - 1; }
-    public int maxZ() { return z0 + depth - 1; }
+    /**
+     * 外框。
+     *
+     * <p>**含樓梯**：樓梯長在量體外面，外框不撐大的話，區塊填充根本不會掃到它那幾柱，
+     * 高度圖也會回報那裡是空地。
+     */
+    public int minX() { return x0 - out(2); }
+    public int minZ() { return z0 - out(0); }
+    public int maxX() { return x0 + width - 1 + out(3); }
+    public int maxZ() { return z0 + depth - 1 + out(1); }
+
+    /** 這個面往外伸出去幾格。 */
+    private int out(int face) {
+        return stair != null && stair.face() == face ? stair.reach() : 0;
+    }
     public int minY() { return baseY; }
     public int maxY() { return baseY + height - 1; }
 
