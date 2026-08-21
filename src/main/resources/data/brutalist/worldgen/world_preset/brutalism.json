@@ -1,0 +1,41 @@
+{
+  "dimensions": {
+    "minecraft:overworld": {
+      "type": "brutalist:brutalism",
+      "generator": {
+        "type": "brutalist:brutalist",
+        "biome_source": {
+          "type": "minecraft:fixed",
+          "biome": "brutalist:concrete"
+        },
+        "settings": {
+          "cell": 160,
+          "street": 10,
+          "ground": 20,
+          "relief": 8,
+          "min_height": 56,
+          "max_height": 340,
+          "density": 1.0,
+          "min_y": 0,
+          "world_height": 384
+        }
+      }
+    },
+    "minecraft:the_nether": {
+      "type": "minecraft:the_nether",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": { "type": "minecraft:multi_noise", "preset": "minecraft:nether" },
+        "settings": "minecraft:nether"
+      }
+    },
+    "minecraft:the_end": {
+      "type": "minecraft:the_end",
+      "generator": {
+        "type": "minecraft:noise",
+        "biome_source": { "type": "minecraft:the_end" },
+        "settings": "minecraft:end"
+      }
+    }
+  }
+}

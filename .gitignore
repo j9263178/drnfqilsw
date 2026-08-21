@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+
+# Minecraft 開發期執行環境：世界存檔、log、生成出來的設定檔。
+# run/ 有將近 150 MB 的世界資料，而且全部都能從程式碼重新生成
+run/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db

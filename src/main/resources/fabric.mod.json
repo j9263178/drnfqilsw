@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "brutalist",
+  "version": "${version}",
+  "name": "Brutalist World",
+  "description": "一個只有混凝土巨型幾何體的世界。自訂 ChunkGenerator，沒有地形、沒有植物，只有量體。",
+  "authors": ["xinbow99"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["com.xinbow99.brutalist.Brutalist"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "fabric-api": "*",
+    "minecraft": "~26.2",
+    "java": ">=25"
+  }
+}

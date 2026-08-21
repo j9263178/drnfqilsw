@@ -1,0 +1,10 @@
+# 統一用 LF 存進版本庫。gradlew 是 shell script，被轉成 CRLF 的話
+# 在 Linux / macOS 上會直接跑不起來，而且那個錯誤訊息看不出原因
+* text=auto eol=lf
+
+# 這兩個相反：Windows 的批次檔需要 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.jar binary
+*.png binary
