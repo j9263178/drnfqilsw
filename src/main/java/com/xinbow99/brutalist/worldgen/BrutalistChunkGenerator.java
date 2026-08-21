@@ -146,7 +146,7 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
             int bx = Math.min(x0 + 15, plot.maxX());
             int az = Math.max(z0, plot.minZ());
             int bz = Math.min(z0 + 15, plot.maxZ());
-            int ay = Math.max(floor, plot.minY());
+            int ay = Math.max(floor, plot.scanFloor());
             int by = Math.min(roof, plot.maxY());
 
             for (int wx = ax; wx <= bx; wx++) {

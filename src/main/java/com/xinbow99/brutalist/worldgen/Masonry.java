@@ -1,8 +1,11 @@
 package com.xinbow99.brutalist.worldgen;
 
+import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /**
  * 量體的材質：石材的混合。
@@ -46,6 +49,25 @@ public final class Masonry {
     private static final BlockState[] ACCENT = {DEEPSLATE, DEEPSLATE, DEEPSLATE, TUFF, COBBLE, ANDESITE};
 
     private Masonry() {
+    }
+
+    /**
+     * 同一種石材的樓梯方塊，朝著往上走的方向。
+     *
+     * <p>踏階非得是樓梯方塊不可：整塊的話玩家爬不上去（原版的自動跨步只有 0.6 格）。
+     * {@code FACING} 是**往上走的方向**——原版 {@code block/stairs} 模型裡高的那半塊
+     * 落在 facing 那一側，所以踩上去先遇到低的半格。
+     *
+     * <p>深板岩沒有素面的樓梯，用鵝卵深板岩代替；它是這五種裡唯一對不上的。
+     */
+    public static BlockState stairs(BlockState material, Direction facing) {
+        Block block;
+        if (material == COBBLE) block = Blocks.COBBLESTONE_STAIRS;
+        else if (material == DEEPSLATE) block = Blocks.COBBLED_DEEPSLATE_STAIRS;
+        else if (material == ANDESITE) block = Blocks.ANDESITE_STAIRS;
+        else if (material == TUFF) block = Blocks.TUFF_STAIRS;
+        else block = Blocks.STONE_STAIRS;
+        return block.defaultBlockState().setValue(BlockStateProperties.HORIZONTAL_FACING, facing);
     }
 
     /**

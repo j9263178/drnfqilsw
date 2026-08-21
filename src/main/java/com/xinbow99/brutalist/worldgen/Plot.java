@@ -1,5 +1,6 @@
 package com.xinbow99.brutalist.worldgen;
 
+import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -235,7 +236,7 @@ public final class Plot {
         Box[] boxes = form == Form.ASSEMBLY
                 ? rollBoxes(build, width, depth, height)
                 : NO_BOXES;
-        Stair stair = rollStair(build, form, width, depth);
+        Stair stair = rollStair(build, form, width, depth, s.street());
 
         return new Plot(
                 x0, z0,
@@ -264,19 +265,23 @@ public final class Plot {
      * 樓梯要嘛跟著歪掉（它是折返梯，歪了就不是折返梯），要嘛爬到一半離開牆面飄在空中。
      * 兩種都比沒有樓梯難看，所以這裡用擺放規則把問題消掉，而不是想辦法讓樓梯貼著曲面走。
      */
-    private static Stair rollStair(RandomSource r, Form form, int width, int depth) {
+    private static Stair rollStair(RandomSource r, Form form, int width, int depth, int street) {
         if (form != Form.SLAB && form != Form.PERFORATED && form != Form.CROSS) return null;
         if (r.nextInt(100) >= 45) return null;
-
-        int flight = 6 + r.nextInt(3);
-        int run = flight + 1;
-        int face = r.nextInt(4);
-        int span = face < 2 ? width : depth;
-        if (span < run + 2) return null;
-
-        return new Stair(face, r.nextInt(span - run + 1), 4 + r.nextInt(2),
-                flight, r.nextInt(3), r.nextInt());
+        return Stair.roll(r, width, depth, street);
     }
+
+    /**
+     * 樓梯的四個局部方向（沿牆正負、離牆正負）在每個面上對應到哪個世界方向。
+     *
+     * <p>{@link Stair} 一個面都不必知道，它只說「往前」「往外」，換算全部在這張表裡。
+     */
+    private static final Direction[][] AXES = {
+            {Direction.EAST, Direction.WEST, Direction.NORTH, Direction.SOUTH},   // 北面
+            {Direction.EAST, Direction.WEST, Direction.SOUTH, Direction.NORTH},   // 南面
+            {Direction.SOUTH, Direction.NORTH, Direction.WEST, Direction.EAST},   // 西面
+            {Direction.SOUTH, Direction.NORTH, Direction.EAST, Direction.WEST},   // 東面
+    };
 
     private static final Box[] NO_BOXES = new Box[0];
 
@@ -411,7 +416,8 @@ public final class Plot {
             case 2 -> { a = v; b = -u; }                    // 西面
             default -> { a = v; b = u - (width - 1); }      // 東面
         }
-        return stair.at(a - stair.along(), b, h, height - 1, this, wx, wy, wz);
+        return stair.blockAt(a - stair.along(), b, h, height - 1, this, wx, wy, wz,
+                AXES[stair.face()]);
     }
 
     private BlockState massAt(int u, int v, int h, int wx, int wy, int wz) {
@@ -460,6 +466,16 @@ public final class Plot {
      */
     public boolean footprintSolid(int wx, int wz) {
         return solid(wx - x0, wz - z0, 0);
+    }
+
+    /**
+     * 區塊填充要從哪個高度開始掃。
+     *
+     * <p>比 {@link #minY()} 低，因為樓梯會往下折到地面（見 {@link Stair#DIG}）。
+     * {@code minY} 本身不能動：基座是填到量體的底，不是填到樓梯的底。
+     */
+    public int scanFloor() {
+        return stair == null ? baseY : baseY - Stair.DIG;
     }
 
     /** 這一柱在不在這棟樓的水平範圍內。 */
