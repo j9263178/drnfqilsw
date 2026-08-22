@@ -343,12 +343,17 @@ public final class Corridor {
             // 單柱：中央一根，上面靠帽梁展開
             case 2 -> Math.abs(dt) <= 3 && Math.abs(o) <= 3;
 
-            // 拱：一片牆從中間掏掉一個圓洞，可以從底下穿過去
+            // 門型：兩支腿站在地上，頂上一道深梁把力傳到整個橋面全寬。
+            //
+            // 開口是**方的**。原本是一片牆從中間挖掉一個圓，而圓在方塊裡只會得到一圈鋸齒——
+            // 半徑愈小愈糟，而這裡的半徑正好在最糟的區間。這個世界其他每一樣東西都是正交的，
+            // 那個圓是唯一的外來語。方形開口功能完全一樣（底下照樣穿得過去），
+            // 而且深梁那條水平線讓它讀得出「這裡有結構在傳力」，比圓洞更像橋
             default -> {
                 if (Math.abs(dt) > 3 || Math.abs(o) > half - 2) yield false;
-                int r = Math.max(3, Math.min(half - 4, span * 4 / 10));
-                int dy = up - span * 55 / 100;
-                yield o * o + dy * dy > r * r;
+                int beam = Math.max(4, span * 22 / 100);
+                if (up >= span - beam) yield true;                  // 深梁
+                yield Math.abs(o) >= Math.max(3, half - 8);         // 兩支腿
             }
         };
     }
