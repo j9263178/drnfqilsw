@@ -92,8 +92,13 @@ public final class Plot {
     /** {@link Form#ASSEMBLY} 的組成方塊，其他形狀是空陣列。 */
     private final Box[] boxes;
 
-    /** {@link Form#AGGREGATE} 的外廓球體，其他形狀是空陣列。 */
-    private final Lobe[] lobes;
+    /**
+     * {@link Form#AGGREGATE} 的外廓，其他形狀是空陣列。
+     *
+     * <p>跟 {@link #boxes} 同一個型別但用途完全不同：那個是量體**本身**，
+     * 這個是量體的**範圍**——盒子從它的表面長出來，它自己也是實心的。
+     */
+    private final Box[] shell;
 
     /** 集合體的磚格用的 salt。 */
     private final int brickSalt;
@@ -112,7 +117,7 @@ public final class Plot {
                  int armGap, int armThickness, int plinth, int parapet,
                  boolean raw, int lift, int columnGap, int columnWidth,
                  Masonry.Palette palette, int decayScale, int decaySalt, float decayAt,
-                 Box[] boxes, Lobe[] lobes, int brickSalt,
+                 Box[] boxes, Box[] shell, int brickSalt,
                  Stair stair, Rooftop roof, Precinct precinct) {
         this.x0 = x0;
         this.z0 = z0;
@@ -138,7 +143,7 @@ public final class Plot {
         this.decaySalt = decaySalt;
         this.decayAt = decayAt;
         this.boxes = boxes;
-        this.lobes = lobes;
+        this.shell = shell;
         this.brickSalt = brickSalt;
         this.stair = stair;
         this.roof = roof;
@@ -183,14 +188,6 @@ public final class Plot {
                 default -> true;
             };
         }
-    }
-
-    /**
-     * 集合體外廓的一顆球。
-     *
-     * <p>三軸半徑分開給：等半徑的球疊起來像一串葡萄，而這個題材要的是壓扁的、橫向發展的塊體。
-     */
-    public record Lobe(int u, int v, int h, int ru, int rv, int rh) {
     }
 
     /** 問「這一柱的地面在哪個高度」。由生成器接到 {@link Ground#height} 上。 */
@@ -274,9 +271,9 @@ public final class Plot {
         Box[] boxes = form == Form.ASSEMBLY
                 ? rollBoxes(build, width, depth, height)
                 : NO_BOXES;
-        Lobe[] lobes = form == Form.AGGREGATE
-                ? rollLobes(build, width, depth, height)
-                : NO_LOBES;
+        Box[] shell = form == Form.AGGREGATE
+                ? rollShell(build, width, depth, height)
+                : NO_BOXES;
         int brickSalt = build.nextInt();
         Stair stair = rollStair(build, form, width, depth, s.street());
         Rooftop roof = Rooftop.roll(build, width, depth);
@@ -298,7 +295,7 @@ public final class Plot {
                 12 + build.nextInt(9),
                 build.nextInt(),
                 0.76f + build.nextFloat() * 0.10f,
-                boxes, lobes, brickSalt, stair, roof, null);
+                boxes, shell, brickSalt, stair, roof, null);
     }
 
     /**
@@ -326,7 +323,7 @@ public final class Plot {
         return new Plot(x0, z0, level, width, depth, precinct.top() + 1, Form.SLAB,
                 6, 5, 8, 3, 26, 12, 4, 2, true, 0, 12, 3,
                 palette, 16, build.nextInt(), 2f,
-                NO_BOXES, NO_LOBES, 0, null, new Rooftop(new Rooftop.Item[0], 0, 0), precinct);
+                NO_BOXES, NO_BOXES, 0, null, new Rooftop(new Rooftop.Item[0], 0, 0), precinct);
     }
 
     /**
@@ -355,7 +352,6 @@ public final class Plot {
     };
 
     private static final Box[] NO_BOXES = new Box[0];
-    private static final Lobe[] NO_LOBES = new Lobe[0];
 
     /**
      * 擲一組組合體。
@@ -412,103 +408,155 @@ public final class Plot {
     }
 
     /**
-     * 擲一團外廓球體。
+     * 擲一團外廓。
+     *
+     * <h3>為什麼是長方體而不是球</h3>
+     * <p>球的版本要靠場強的門檻來決定「在不在裡面」，而兩顆球在門檻的等值面上有沒有相交，
+     * 是一個沒有閉式解的問題——實際上就踩過一次：整條肢體在幾何上看起來連著，
+     * 實際浮在空中。長方體的包含判斷是**精確的整數比較**，
+     * 「子塊的中心落在母塊裡面」就百分之百保證兩塊相交，沒有邊界情況。
+     *
+     * <p>而且這個世界的語彙本來就是直角的。球體外廓長出來的東西，
+     * 遠看是一顆長了疣的馬鈴薯；長方體外廓長出來的，遠看是一座山，近看是一堆房子。
      *
      * <h3>連通是擲出來的，不是檢查出來的</h3>
-     * <p>純函數裡沒辦法回頭問「這一塊有沒有接到地面」——那需要追溯，而追溯沒有上界。
-     * 所以連通性必須是**擺放規則的結果**：第一顆坐在地上、罩住大半個平面，
-     * 之後每一顆的球心都落在**某一顆已經存在的球的半徑之內**，兩顆一定重疊。
-     * 於是整團必然連通、也必然落地，一次檢查都不用做。
-     *
-     * <h3>為什麼往上長要挑母球，而不是接著上一顆</h3>
-     * <p>接著上一顆會長成一條鏈——一根歪歪扭扭的柱子。隨機挑一顆當母球則會長成一叢，
-     * 有分岔、有橫向的膨大，那才是「一團」而不是「一串」。
+     * <p>第一塊坐在地上、鋪滿大半個平面；之後每一塊的**中心點都取在某一塊已經存在的塊裡面**，
+     * 兩塊必定相交。於是整團必然連通、必然落地，一次檢查都不用做——
+     * 而純函數裡本來也做不了那個檢查。
      */
-    private static Lobe[] rollLobes(RandomSource r, int width, int depth, int height) {
-        int n = 12 + r.nextInt(8);
-        Lobe[] out = new Lobe[n];
+    private static Box[] rollShell(RandomSource r, int width, int depth, int height) {
+        int n = 9 + r.nextInt(8);
+        Box[] out = new Box[n];
 
-        // 第一顆：坐在地面上的底座，横向鋪滿，垂直壓扁
-        out[0] = new Lobe(width / 2, depth / 2, height / 8,
-                Math.max(12, width * (46 + r.nextInt(18)) / 100),
-                Math.max(12, depth * (46 + r.nextInt(18)) / 100),
-                Math.max(14, height / 4));
+        // 第一塊：坐在地面上的底座。橫向鋪滿、垂直壓扁，整團才有一個站得住的下盤
+        int a0 = Math.max(10, width * (30 + r.nextInt(14)) / 100);
+        int b0 = Math.max(10, depth * (30 + r.nextInt(14)) / 100);
+        out[0] = new Box(clamp(width / 2 - a0, width - 1), clamp(depth / 2 - b0, depth - 1), 0,
+                clamp(width / 2 + a0, width - 1), clamp(depth / 2 + b0, depth - 1),
+                Math.max(12, height * (18 + r.nextInt(16)) / 100), Box.NONE);
 
         int highest = 0;
         for (int i = 1; i < n; i++) {
-            // 最後兩顆掛在**目前最高的那一顆**上，讓整團長到天花板；
-            // 其餘隨機挑一顆當母球，長成一叢而不是一串
-            // 四成五掛在目前最高的那一顆上。整團要爬得上去，靠的是這條——
-            // 每一步最多只能往上半個母球半徑（再多就離開母球的實心了），
-            // 所以要長到兩百格高，必須有夠多步是往上走的
-            Lobe on = out[i >= n - 2 || r.nextInt(100) < 45 ? highest : r.nextInt(i)];
-            int ru = Math.max(9, width * (11 + r.nextInt(19)) / 100);
-            int rv = Math.max(9, depth * (11 + r.nextInt(19)) / 100);
-            int rh = Math.max(12, height * (14 + r.nextInt(22)) / 100);
+            // 一半掛在目前最高的那一塊上（整團才爬得上去），其餘隨機挑一塊——
+            // 一路接著上一塊會長成一條歪歪扭扭的鏈，挑不同的母塊才會長成一叢
+            boolean climb = i >= n - 2 || r.nextInt(100) < 50;
+            Box on = out[climb ? highest : r.nextInt(i)];
 
-            // 球心必須落在母球的**實心**裡面，而那是一個對三軸合起來算的條件。
-            //
-            // 只管單軸（各偏半個半徑）是不夠的：三軸同時偏半個半徑，合成的
-            // d² = 0.25×3 = 0.75，母球在那裡的場強是 (1-0.75)² ≒ 0.06，遠低於門檻
-            // ——子球整顆浮在母球外面。實測有四分之一的體積是這樣飄著的。
-            //
-            // 所以先自由擲一個偏移，再把**合成距離**壓回 0.30 以內：
-            // 母球在那裡的場強至少 (1-0.30)² ≒ 0.49，高於門檻，兩塊必定連通。
-            int du = r.nextInt(on.ru() + 1) - on.ru() / 2;
-            int dv = r.nextInt(on.rv() + 1) - on.rv() / 2;
-            int dh = i >= n - 2
-                    ? on.rh() / 2                      // 往上爬的那幾顆：純垂直
-                    : r.nextInt(on.rh() + 1) - on.rh() / 3;
+            // 中心點取在母塊**裡面**：這一行就是連通性的全部
+            int cu = on.u0() + r.nextInt(on.u1() - on.u0() + 1);
+            int cv = on.v0() + r.nextInt(on.v1() - on.v0() + 1);
+            int ch = climb
+                    ? on.h1() - r.nextInt(Math.max(1, (on.h1() - on.h0()) / 3 + 1))
+                    : on.h0() + r.nextInt(on.h1() - on.h0() + 1);
 
-            float dd = norm(du, on.ru()) + norm(dv, on.rv()) + norm(dh, on.rh());
-            if (dd > 0.30f) {
-                float k = (float) Math.sqrt(0.30f / dd);
-                du = Math.round(du * k);
-                dv = Math.round(dv * k);
-                dh = Math.round(dh * k);
-            }
+            int a = Math.max(7, width * (10 + r.nextInt(20)) / 100);
+            int b = Math.max(7, depth * (10 + r.nextInt(20)) / 100);
+            int c = Math.max(10, height * (10 + r.nextInt(20)) / 100);
 
-            int u = clamp(on.u() + du, width - 1);
-            int v = clamp(on.v() + dv, depth - 1);
-            int h = clamp(on.h() + dh, height - 1);
-
-            out[i] = new Lobe(u, v, h, ru, rv, rh);
-            if (h > out[highest].h()) highest = i;
+            int h0 = Math.max(0, ch - c);
+            int h1 = Math.min(height - 1, ch + c);
+            out[i] = new Box(clamp(cu - a, width - 1), clamp(cv - b, depth - 1), h0,
+                    clamp(cu + a, width - 1), clamp(cv + b, depth - 1), h1,
+                    r.nextInt(5) == 0 ? Box.BATTER : Box.NONE);
+            if (h1 > out[highest].h1()) highest = i;
         }
         return out;
     }
 
+    /** 這一點在不在外廓裡面。外廓是實心的，盒子從它的表面長出來。 */
+    boolean inShell(int u, int v, int h) {
+        for (Box box : shell) {
+            if (box.has(u, v, h)) return true;
+        }
+        return false;
+    }
+
     /**
-     * 外廓的場強。大於門檻就是「在那團東西裡面」。
+     * 晶格單元的查表：{@code 1} ＝ 這個單元的種子落在外廓裡（會長出盒子），
+     * {@code 2} 那一位 ＝ 鄰近 3×3×3 裡有任何一個會長。
      *
-     * <p>用 {@code (1-d²)²} 而不是硬邊的球：硬邊的話兩顆球交接處會有一道折角，
-     * 而這種衰減會讓它們**融**成一個帶頸部的形狀——集合體要的正是那個頸部。
-     *
-     * <p>刻意**不加**雜訊：外廓必須是純粹的球體場，它的等值面才保證是一個連通的區域。
-     * 加了雜訊，門檻附近會冒出零星的孤立殼——而不規則的外形現在是由表面長出來的盒子
-     * 負責的，外廓本身乾淨才好。
+     * <p>**懶建**，因為它只有集合體用得到，而它要掃幾千個單元。
+     * 兩條執行緒同時建也無所謂：內容只跟座標與種子有關，兩份一定一樣。
      */
-    float blob(int u, int v, int h) {
-        float sum = 0f;
-        for (Lobe lobe : lobes) {
-            float du = (u - lobe.u()) / (float) lobe.ru();
-            float dv = (v - lobe.v()) / (float) lobe.rv();
-            float dh = (h - lobe.h()) / (float) lobe.rh();
-            float d = du * du + dv * dv + dh * dh;
-            if (d < 1f) {
-                float f = 1f - d;
-                sum += f * f;
+    private volatile byte[] seedTable;
+
+    private static final byte[] NO_SEEDS = new byte[0];
+
+    /** 表的邊長（單元數），三軸各留一圈邊，因為盒子會伸出量體外面。 */
+    private int seedSpan(int size) {
+        return size / Form.SEED + 3;
+    }
+
+    private int seedIndex(int cu, int cv, int ch) {
+        int w = seedSpan(width);
+        int d = seedSpan(depth);
+        int t = seedSpan(height);
+        int u = cu + 1;
+        int v = cv + 1;
+        int h = ch + 1;
+        if (u < 0 || v < 0 || h < 0 || u >= w || v >= d || h >= t) return -1;
+        return (u * d + v) * t + h;
+    }
+
+    private byte[] table() {
+        byte[] table = seedTable;
+        if (table != null) return table;
+        if (shell.length == 0) return seedTable = NO_SEEDS;
+
+        int w = seedSpan(width);
+        int d = seedSpan(depth);
+        int t = seedSpan(height);
+        table = new byte[w * d * t];
+
+        for (int cu = -1; cu < w - 1; cu++) {
+            for (int cv = -1; cv < d - 1; cv++) {
+                for (int ch = -1; ch < t - 1; ch++) {
+                    int key = Masonry.hash(cu, cv ^ brickSalt, ch);
+                    if (inShell(Form.centre(key, cu, 0), Form.centre(key, cv, 4),
+                            Form.centre(key, ch, 8))) {
+                        table[seedIndex(cu, cv, ch)] |= 1;
+                    }
+                }
             }
         }
-        return sum;
+        // 膨脹一圈：一格只要鄰近 3×3×3 裡有任何一個種子會長，就值得跑 sprout
+        for (int i = 0; i < table.length; i++) {
+            if ((table[i] & 1) == 0) continue;
+            int h = i % t;
+            int v = (i / t) % d;
+            int u = i / t / d;
+            for (int du = -1; du <= 1; du++) {
+                for (int dv = -1; dv <= 1; dv++) {
+                    for (int dh = -1; dh <= 1; dh++) {
+                        int j = seedIndex(u - 1 + du, v - 1 + dv, h - 1 + dh);
+                        if (j >= 0) table[j] |= 2;
+                    }
+                }
+            }
+        }
+        return seedTable = table;
+    }
+
+    /** 這個晶格單元的種子在不在外廓裡面。 */
+    boolean seedInShell(int cu, int cv, int ch) {
+        int i = seedIndex(cu, cv, ch);
+        byte[] table = table();
+        return i >= 0 && i < table.length && (table[i] & 1) != 0;
+    }
+
+    /**
+     * 這一格附近有沒有任何盒子可能長過來。
+     *
+     * <p>擋掉外接矩形裡那一大片空氣用的：沒有這一關，每一格空氣都要去掃二十七個單元。
+     */
+    boolean nearSeed(int u, int v, int h) {
+        int i = seedIndex(Math.floorDiv(u, Form.SEED), Math.floorDiv(v, Form.SEED),
+                Math.floorDiv(h, Form.SEED));
+        byte[] table = table();
+        return i >= 0 && i < table.length && (table[i] & 2) != 0;
     }
 
     int brickSalt() { return brickSalt; }
-
-    private static float norm(int d, int r) {
-        float t = d / (float) Math.max(1, r);
-        return t * t;
-    }
 
     private static int clamp(int value, int max) {
         return Math.max(0, Math.min(Math.max(0, max), value));

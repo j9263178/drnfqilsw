@@ -142,10 +142,10 @@ public enum Form {
      * 集合體：一個巨大的實心外廓，表面上長滿互相重疊的長方體。
      *
      * <h2>兩步：先有整體，再讓盒子從表面長出來</h2>
-     * <p>{@link #ASSEMBLY} 是由下往上疊幾塊大方體，側影是副產品，所以永遠讀得出
-     * 「這是三四塊東西」。這一種先決定整體要是什麼形狀（一團融合的球體場，見
-     * {@link Plot#blob}），那團東西**本身就是實心的**；然後在它的表面附近撒下一堆
-     * 長方體，各自往外長。
+     * <p>{@link #ASSEMBLY} 是由下往上疊三到六塊大方體，塊數少到每一塊都看得出來，
+     * 所以它讀起來永遠是「幾塊東西」。這一種的外廓是**十幾塊互相咬住的大長方體**
+     * （見 {@link Plot#inShell}），本身就是實心的；然後在它的表面附近撒下幾百個小長方體，
+     * 各自往外長。大的定範圍，小的定質地。
      *
      * <h2>盒子不切格子，可以互相重疊</h2>
      * <p>把空間切成磚、一格只能屬於一塊的話，接縫會全部對齊到同一套網格，
@@ -167,24 +167,23 @@ public enum Form {
     AGGREGATE {
         @Override
         boolean mass(int u, int v, int h, Plot p) {
-            float core = p.blob(u, v, h);
-            if (core >= CORE) return true;
-            // 離那團東西夠遠就直接否決，不要為了每一格空氣去掃二十七個晶格——
-            // 量體的外接矩形裡絕大多數是空氣，這一行決定整個生成器跑得動跑不動。
-            // 代價只是「伸得特別遠的盒子會被切短」，不會讓任何盒子斷開
-            if (core < 0.03f) return false;
+            if (p.inShell(u, v, h)) return true;
+            // 離外廓夠遠就直接否決，不要為了每一格空氣去掃二十七個晶格——
+            // 外接矩形裡絕大多數是空氣，這一關決定整個生成器跑得動跑不動。
+            // 放大的格數等於盒子的最大半徑，所以不會漏掉任何一個盒子
+            if (!p.nearSeed(u, v, h)) return false;
             return sprout(u, v, h, p) != 0;
         }
     };
 
-    /** 外廓的門檻。低於它就不是實心的本體，只能靠盒子長過來。 */
-    static final float CORE = 0.40f;
+    /** 盒子的最大半徑。烤表時要往外多留一圈就是留這麼多。 */
+    static final int REACH = 12;
 
     /**
      * 盒子的晶格間距。一個單元一個盒子，而盒子最大到 15 格——比間距大，
      * 所以相鄰的盒子必然互相重疊，這正是要的。
      */
-    private static final int SEED = 10;
+    static final int SEED = 10;
 
     /**
      * 這一格被哪一個盒子蓋到，回傳那個盒子的雜湊；{@code 0} ＝ 沒有。
@@ -192,6 +191,11 @@ public enum Form {
      * <p>回傳雜湊而不是布林，材質才有辦法「一個盒子一個顏色」——那是這種形狀
      * 讀得出「很多塊」的另一半原因，光靠幾何不夠。
      */
+    /** 一個晶格單元裡那個盒子的中心，沿某一軸。中心在單元內隨機，盒子才不會排成一列。 */
+    static int centre(int key, int cell, int shift) {
+        return cell * SEED + Math.floorMod(key >>> shift, SEED);
+    }
+
     static int sprout(int u, int v, int h, Plot p) {
         int su = Math.floorDiv(u, SEED);
         int sv = Math.floorDiv(v, SEED);
@@ -203,26 +207,21 @@ public enum Form {
                     int cu = su + du;
                     int cv = sv + dv;
                     int ch = sh + dh;
-                    int key = Masonry.hash(cu, cv ^ p.brickSalt(), ch);
 
-                    // 中心在單元內隨機，三軸尺寸各自隨機——三軸同尺寸的話全是正方體
-                    int bx = cu * SEED + Math.floorMod(key, SEED);
-                    int by = cv * SEED + Math.floorMod(key >>> 4, SEED);
-                    int bz = ch * SEED + Math.floorMod(key >>> 8, SEED);
-                    int a = 5 + ((key >>> 13) & 7);
-                    int b = 5 + ((key >>> 17) & 7);
-                    int c = 5 + ((key >>> 21) & 7);
-
-                    if (Math.abs(u - bx) > a || Math.abs(v - by) > b || Math.abs(h - bz) > c) {
-                        continue;
-                    }
-                    // 貴的那一步留到最後：確定這一格在盒子裡，才去問種子在不在實心裡
-                    // 種子必須落在**實心裡面**，一格都不能寬鬆。
+                    // 種子必須落在外廓**裡面**：這樣盒子一定含著一格實心的本體，
+                    // 連通性是包含判斷直接給的，不是調參數換來的。
                     //
-                    // 放寬成「差一點點也算」的話，梯度平緩的地方那個「一點點」會是五六格，
-                    // 而盒子最小半徑只有四格——於是盒子跟本體之間差一格，變成飄在旁邊的積木。
-                    // 收緊成這樣，盒子必定含著一格實心的本體，連通性就不是靠調參數換來的
-                    if (p.blob(bx, by, bz) >= CORE) return key | 1;
+                    // 查的是預先烤好的表，不是現算。同一個種子會被上千格問到，
+                    // 每次都重跑一次外廓那十幾塊的包含判斷，生成器就慢到跑不完
+                    if (!p.seedInShell(cu, cv, ch)) continue;
+
+                    int key = Masonry.hash(cu, cv ^ p.brickSalt(), ch);
+                    // 中心在單元內隨機、三軸尺寸各自隨機——三軸同尺寸的話全是正方體
+                    if (Math.abs(u - centre(key, cu, 0)) <= 5 + ((key >>> 13) & 7)
+                            && Math.abs(v - centre(key, cv, 4)) <= 5 + ((key >>> 17) & 7)
+                            && Math.abs(h - centre(key, ch, 8)) <= 5 + ((key >>> 21) & 7)) {
+                        return key | 1;
+                    }
                 }
             }
         }
