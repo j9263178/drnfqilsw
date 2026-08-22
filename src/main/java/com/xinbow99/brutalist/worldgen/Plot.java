@@ -434,23 +434,46 @@ public final class Plot {
                 Math.max(12, depth * (46 + r.nextInt(18)) / 100),
                 Math.max(14, height / 4));
 
+        int highest = 0;
         for (int i = 1; i < n; i++) {
-            Lobe on = out[r.nextInt(i)];
+            // 最後兩顆掛在**目前最高的那一顆**上，讓整團長到天花板；
+            // 其餘隨機挑一顆當母球，長成一叢而不是一串
+            // 四成五掛在目前最高的那一顆上。整團要爬得上去，靠的是這條——
+            // 每一步最多只能往上半個母球半徑（再多就離開母球的實心了），
+            // 所以要長到兩百格高，必須有夠多步是往上走的
+            Lobe on = out[i >= n - 2 || r.nextInt(100) < 45 ? highest : r.nextInt(i)];
             int ru = Math.max(9, width * (11 + r.nextInt(19)) / 100);
             int rv = Math.max(9, depth * (11 + r.nextInt(19)) / 100);
-            int rh = Math.max(12, height * (9 + r.nextInt(17)) / 100);
+            int rh = Math.max(12, height * (14 + r.nextInt(22)) / 100);
 
-            // 球心落在母球半徑之內 → 兩顆一定融得起來
-            int u = clamp(on.u() + r.nextInt(on.ru() * 2 + 1) - on.ru(), width - 1);
-            int v = clamp(on.v() + r.nextInt(on.rv() * 2 + 1) - on.rv(), depth - 1);
-            // 高度偏向往上：不加這個偏壓，整團會攤成一塊餅。
-            // 最後兩顆直接頂到天花板——不然這團東西只長到基地允許高度的一半，
-            // 而它是這個世界裡最該有存在感的一種
-            int h = i >= n - 2
-                    ? height - 1 - r.nextInt(Math.max(1, rh / 2))
-                    : clamp(on.h() + r.nextInt(on.rh() + rh) - on.rh() / 3, height - 1);
+            // 球心必須落在母球的**實心**裡面，而那是一個對三軸合起來算的條件。
+            //
+            // 只管單軸（各偏半個半徑）是不夠的：三軸同時偏半個半徑，合成的
+            // d² = 0.25×3 = 0.75，母球在那裡的場強是 (1-0.75)² ≒ 0.06，遠低於門檻
+            // ——子球整顆浮在母球外面。實測有四分之一的體積是這樣飄著的。
+            //
+            // 所以先自由擲一個偏移，再把**合成距離**壓回 0.30 以內：
+            // 母球在那裡的場強至少 (1-0.30)² ≒ 0.49，高於門檻，兩塊必定連通。
+            int du = r.nextInt(on.ru() + 1) - on.ru() / 2;
+            int dv = r.nextInt(on.rv() + 1) - on.rv() / 2;
+            int dh = i >= n - 2
+                    ? on.rh() / 2                      // 往上爬的那幾顆：純垂直
+                    : r.nextInt(on.rh() + 1) - on.rh() / 3;
+
+            float dd = norm(du, on.ru()) + norm(dv, on.rv()) + norm(dh, on.rh());
+            if (dd > 0.30f) {
+                float k = (float) Math.sqrt(0.30f / dd);
+                du = Math.round(du * k);
+                dv = Math.round(dv * k);
+                dh = Math.round(dh * k);
+            }
+
+            int u = clamp(on.u() + du, width - 1);
+            int v = clamp(on.v() + dv, depth - 1);
+            int h = clamp(on.h() + dh, height - 1);
 
             out[i] = new Lobe(u, v, h, ru, rv, rh);
+            if (h > out[highest].h()) highest = i;
         }
         return out;
     }
@@ -481,6 +504,11 @@ public final class Plot {
     }
 
     int brickSalt() { return brickSalt; }
+
+    private static float norm(int d, int r) {
+        float t = d / (float) Math.max(1, r);
+        return t * t;
+    }
 
     private static int clamp(int value, int max) {
         return Math.max(0, Math.min(Math.max(0, max), value));
