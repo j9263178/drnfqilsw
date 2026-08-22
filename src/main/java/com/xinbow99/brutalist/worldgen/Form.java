@@ -174,9 +174,13 @@ public enum Form {
             float core = p.blob(bu, bv, bh);
             if (core < 0.09f) return false;
 
-            // 逐磚的門檻偏移：凸出去或縮進來
-            float bias = (Math.floorMod(Masonry.hash(bu, bv, bh ^ p.brickSalt()), 1000) / 1000f
-                    - 0.44f) * 0.46f;
+            // 門檻的偏移必須是**空間相關**的，不能每塊磚各擲各的。
+            //
+            // 各擲各的話，邊界那一層會變成隨機的黑白棋盤：一塊接受、隔壁拒絕，
+            // 凸出來的磚只剩一個角連著本體，讀起來就是一堆各自漂浮的方塊——
+            // 而這種形狀的前提是**密集**。改用一份尺度好幾塊磚的平滑雜訊，
+            // 凸出去的就是一叢一叢的體塊，中間不會有洞
+            float bias = (Masonry.grain(bu, bh, bv, 30, 30, p.brickSalt()) - 0.5f) * 0.30f;
             return core + p.blobNoise(bu, bv, bh) + bias >= 0.34f;
         }
     };
@@ -189,10 +193,10 @@ public enum Form {
      * 讀起來是「幾塊大石頭疊著」而不是「一大團密密麻麻的體塊融在一起」——
      * 那個密度正是這種形狀的全部。
      */
-    private static final int[] BRICK = {3, 4, 4, 5, 6, 6, 8, 10};
+    private static final int[] BRICK = {5, 6, 6, 8, 8, 10, 12, 15};
 
     /** 每一區用同一種磚尺寸。區的邊界會把磚切開，那些薄片正好是尺度之間的過渡。 */
-    private static final int ZONE = 21;
+    private static final int ZONE = 32;
 
     private static final long MASK = (1L << 21) - 1;
 
