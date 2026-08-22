@@ -26,6 +26,8 @@ public final class Precinct {
 
     public static final int PLAZA = 0;
     public static final int DEPOT = 1;
+    /** 冷卻塔群。見 {@link #tower}。 */
+    public static final int PLANT = 2;
 
     private static final int FLAT = 0;
     private static final int BARREL = 1;
@@ -55,12 +57,27 @@ public final class Precinct {
     private final int roofY;
     private final int roofKind;
 
+    // ---- 冷卻塔群
+    private final Tower[] towers;
+
     private final int salt;
+
+    /**
+     * 一座冷卻塔。
+     *
+     * @param throatR 喉部（最細處）的半徑，{@code baseR} 是裙擺、{@code topR} 是塔口
+     * @param throatH 喉部的高度。真的冷卻塔喉部靠近頂端，不在中間——
+     *                擺在中間會變成沙漏，擺在上面才是冷卻塔
+     * @param legH    底下那圈斜撐有多高
+     */
+    private record Tower(int u, int v, int throatR, int baseR, int topR,
+                         int height, int throatH, int legH) {
+    }
 
     private Precinct(int kind, int width, int depth, boolean round, int kerb,
                      int sculptKind, int sculptHeight, int sculptReach,
                      boolean alongX, int platforms, int platformWidth, int gauge, int roofY,
-                     int roofKind, int salt) {
+                     int roofKind, Tower[] towers, int salt) {
         this.kind = kind;
         this.width = width;
         this.depth = depth;
@@ -75,6 +92,7 @@ public final class Precinct {
         this.gauge = gauge;
         this.roofY = roofY;
         this.roofKind = roofKind;
+        this.towers = towers;
         this.salt = salt;
     }
 
@@ -86,7 +104,12 @@ public final class Precinct {
             return new Precinct(PLAZA, width, depth,
                     r.nextInt(100) < 45, 1 + r.nextInt(2),
                     Math.floorMod(r.nextInt(), 6), reach * 3 + r.nextInt(reach * 3), reach,
-                    false, 0, 0, 0, 0, 0, salt);
+                    false, 0, 0, 0, 0, 0, NO_TOWERS, salt);
+        }
+
+        if (kind == PLANT) {
+            return new Precinct(PLANT, width, depth, false, 0, 0, 0, 0,
+                    false, 0, 0, 0, 0, 0, rollTowers(r, width, depth), salt);
         }
 
         boolean alongX = r.nextInt(2) == 0;
@@ -98,19 +121,80 @@ public final class Precinct {
         // 火車站的大棚本來就是**空曠**的，那個高度是它唯一的表情
         return new Precinct(DEPOT, width, depth, false, 0, 0, 0, 0,
                 alongX, platforms, platformWidth, gauge,
-                22 + r.nextInt(14), r.nextInt(4), salt);
+                22 + r.nextInt(14), r.nextInt(4), NO_TOWERS, salt);
+    }
+
+    private static final Tower[] NO_TOWERS = new Tower[0];
+
+    /**
+     * 排一群冷卻塔。
+     *
+     * <p>**一定要成群。** 一座孤立的冷卻塔是個地標，一群才是發電廠——而且群體才量得出
+     * 單體有多大：後面那座被前面那座遮掉一半的時候，尺度才成立。
+     *
+     * <p>排成鬆散的格子而不是隨機丟：真的電廠就是排的（機組一組一座），
+     * 而且隨機丟在一百四十格見方裡，兩座重疊的機率高到得寫排斥檢查。
+     */
+    private static Tower[] rollTowers(RandomSource r, int width, int depth) {
+        // 排成格子，而不是排成一列。一列四座的話每座只分到街廓的四分之一寬，
+        // 直徑掉到二十格——那是煙囪不是冷卻塔。這種東西的全部就是它的量體，
+        // 寧可少擺兩座也要讓每一座夠大
+        int roll = r.nextInt(100);
+        int cols = roll < 30 ? 1 : 2;
+        int rows = roll < 30 || roll >= 70 ? 2 : (roll < 50 ? 2 : 3);
+
+        int cw = width / cols;
+        int cd = depth / rows;
+        int baseR = Math.clamp(Math.min(cw, cd) / 2 - 5, 12, 30);
+
+        Tower[] out = new Tower[cols * rows];
+        int i = 0;
+        for (int a = 0; a < cols; a++) {
+            for (int b = 0; b < rows; b++) {
+                // 抖一點點，免得排成一個完美的矩陣；抖太多會撞在一起
+                int u = cw / 2 + a * cw + r.nextInt(7) - 3;
+                int v = cd / 2 + b * cd + r.nextInt(7) - 3;
+                int rr = baseR - r.nextInt(Math.max(1, baseR / 6));
+
+                // 矮胖：高度大約是直徑的一點二到一點六倍。真的冷卻塔比這個瘦，
+                // 但在遊戲裡瘦的塔遠看會變成一根柱子
+                int height = rr * 2 * (120 + r.nextInt(45)) / 100;
+                int throat = rr * (60 + r.nextInt(10)) / 100;
+
+                out[i++] = new Tower(u, v, throat, rr, throat + Math.max(2, rr / 6),
+                        height, height * (74 + r.nextInt(8)) / 100,
+                        Math.max(7, height / 7));
+            }
+        }
+        return out;
     }
 
     /** 這一格的鋪面蓋到哪。基座要靠它決定往下補到哪裡。 */
     public boolean covers(int u, int v) {
         if (u < 0 || v < 0 || u >= width || v >= depth) return false;
+        if (kind == PLANT) {
+            // **只蓋住每座塔腳下那一圈。** 整格鋪成水泥的話，這群塔會像被放在一塊
+            // 標示用的底板上——而它們該是坐在土地上的。塔底仍然要整平一小塊，
+            // 不然斜撐不是浮空就是被土埋掉
+            for (Tower t : towers) {
+                int du = u - t.u();
+                int dv = v - t.v();
+                int rr = t.baseR() + 4;
+                if (du * du + dv * dv <= rr * rr) return true;
+            }
+            return false;
+        }
         if (kind != PLAZA || !round) return true;
         return inEllipse(u, v, 0);
     }
 
     /** 要往上掃幾格。 */
     public int top() {
-        return kind == PLAZA ? sculptHeight + 3 : roofY + 9;
+        if (kind == PLAZA) return sculptHeight + 3;
+        if (kind != PLANT) return roofY + 9;
+        int tallest = 12;
+        for (Tower t : towers) tallest = Math.max(tallest, t.height());
+        return tallest + 3;
     }
 
     /** 軌道區比月台低幾格。差距小於三看不出來，大於四就跳不上去也走不下去。 */
@@ -124,6 +208,15 @@ public final class Precinct {
      * 全部自動跟著走，不必事後再挖一次空氣。
      */
     public int levelAt(int u, int v) {
+        if (kind == PLANT) {
+            // 塔裡面是水池，往下挖兩格
+            for (Tower t : towers) {
+                int du = u - t.u();
+                int dv = v - t.v();
+                if (du * du + dv * dv <= (t.baseR() - 2) * (t.baseR() - 2)) return -2;
+            }
+            return 0;
+        }
         if (kind != DEPOT) return 0;
         int across = alongX ? v : u;
         int pitch = platformWidth + gauge;
@@ -142,9 +235,11 @@ public final class Precinct {
      */
     public BlockState blockAt(int u, int v, int h, Plot plot, int wx, int wy, int wz) {
         if (!covers(u, v) || h < -TRENCH - 2 || h > top()) return null;
-        return kind == PLAZA
-                ? plaza(u, v, h, plot, wx, wy, wz)
-                : depot(u, v, h, plot, wx, wy, wz);
+        return switch (kind) {
+            case PLAZA -> plaza(u, v, h, plot, wx, wy, wz);
+            case PLANT -> plant(u, v, h, plot, wx, wy, wz);
+            default -> depot(u, v, h, plot, wx, wy, wz);
+        };
     }
 
     // ------------------------------------------------------------------ 廣場
@@ -173,6 +268,88 @@ public final class Precinct {
         double du = (u - width / 2.0) / a;
         double dv = (v - depth / 2.0) / b;
         return du * du + dv * dv <= 1.0;
+    }
+
+    // ------------------------------------------------------------------ 冷卻塔群
+
+    private static final BlockState WATER = Blocks.WATER.defaultBlockState();
+
+    /**
+     * 冷卻塔群。
+     *
+     * <p>場區**不鋪面**：塔直接坐在土地上，只有塔腳下那一圈被整平（見 {@link #covers}）。
+     * 這幾座東西的份量來自它們自己，不需要一塊水泥底板來宣告「這裡是廠區」。
+     */
+    private BlockState plant(int u, int v, int h, Plot plot, int wx, int wy, int wz) {
+        for (Tower t : towers) {
+            BlockState state = tower(t, u, v, h, plot, wx, wy, wz);
+            if (state != null) return state;
+        }
+        return null;
+    }
+
+    /**
+     * 一座冷卻塔：雙曲面的薄殼，底下一圈倒 V 斜撐，裡面一池水。
+     *
+     * <h3>殼是空的</h3>
+     * <p>真的冷卻塔就是一層十幾公分的殼，而做成實心會浪費掉這個題材最好的一件事：
+     * 人可以從斜撐之間走進去，站在裡面抬頭看那個口。整座建築裡沒有別的地方給得出這個。
+     *
+     * <h3>為什麼喉部在上面而不是中間</h3>
+     * <p>擺在中間會變成沙漏——上下對稱、沒有方向。真的冷卻塔喉部在七成半高的地方，
+     * 所以裙擺很長很緩、塔口很短很急，側影是有重心的。
+     */
+    private BlockState tower(Tower t, int u, int v, int h, Plot plot, int wx, int wy, int wz) {
+        int du = u - t.u();
+        int dv = v - t.v();
+        int reach = t.baseR() + 2;
+        int d2 = du * du + dv * dv;
+        if (d2 > reach * reach || h > t.height()) return null;
+
+        double d = Math.sqrt(d2);
+
+        // 塔內的水池。水面是絕對高度（就是鋪面基準面），所以它一定是平的
+        if (h <= 0) {
+            return h >= -2 && d <= t.baseR() - 3 ? WATER : null;
+        }
+
+        if (h < t.legH()) {
+            int ring = radiusAt(t, t.legH());
+            if (Math.abs(d - ring) > 1.6) return null;
+
+            // 倒 V：兩族斜柱在殼底交會成一個尖，往下各自岔開，相鄰兩個尖之間的
+            // 兩支腳在地面會合——連起來就是照片裡那一圈鋸齒
+            int pitch = Math.max(5, ring / 4);
+            int lean = (t.legH() - h) * pitch / Math.max(1, t.legH());
+            long arc = Math.round(Math.atan2(dv, du) * ring);
+            boolean strut = Math.floorMod(arc - lean, 2L * pitch) < 2
+                    || Math.floorMod(arc + lean, 2L * pitch) < 2;
+            return strut ? plot.skin(wx, wy, wz) : null;
+        }
+
+        return Math.abs(d - radiusAt(t, h)) <= 1.4 ? plot.skin(wx, wy, wz) : null;
+    }
+
+    /**
+     * 塔殼在某個高度的半徑：真的雙曲線 {@code r = throat·√(1 + (dh/c)²)}。
+     *
+     * <p>本來用拋物線逼近，結果側影是「直筒加一個外撇的腳」——因為拋物線的收分
+     * 全部擠在離喉部最遠的地方。雙曲線遠離喉部時是**線性**的，所以裙擺是一路斜下來的斜線，
+     * 那才是冷卻塔的側影；曲率只集中在喉部附近的那一小段。
+     *
+     * <p>{@code c} 由「裙擺要正好收到 baseR」反推，喉部上下各算一個——
+     * 下面很長很緩、上面很短很急，側影才有重心。
+     */
+    private static int radiusAt(Tower t, int h) {
+        int dh = h - t.throatH();
+        int span = Math.max(1, dh < 0 ? t.throatH() : t.height() - t.throatH());
+        int edge = Math.max(t.throatR() + 1, dh < 0 ? t.baseR() : t.topR());
+
+        double throat = t.throatR();
+        // c² = span²·throat² / (edge² − throat²)
+        double c2 = (double) span * span * throat * throat
+                / ((double) edge * edge - throat * throat);
+        return (int) Math.round(throat * Math.sqrt(1.0 + dh * dh / c2));
     }
 
     // ------------------------------------------------------------------ 公車總站

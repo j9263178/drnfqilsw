@@ -646,7 +646,11 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
         if (plot == null) {
             lines.add("Brutalist: 街道");
         } else if (plot.precinct() != null) {
-            lines.add("Brutalist: " + (plot.precinct().kind() == Precinct.PLAZA ? "廣場" : "公車總站")
+            lines.add("Brutalist: " + switch (plot.precinct().kind()) {
+                        case Precinct.PLAZA -> "廣場";
+                        case Precinct.PLANT -> "冷卻塔群";
+                        default -> "公車總站";
+                    }
                     + " " + plot.width() + "x" + plot.depth());
         } else {
             lines.add("Brutalist: 量體 " + plot.width() + "x" + plot.depth() + "x" + plot.height());
