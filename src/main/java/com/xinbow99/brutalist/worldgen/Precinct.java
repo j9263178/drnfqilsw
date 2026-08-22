@@ -41,7 +41,6 @@ public final class Precinct {
     private static final int SAWTOOTH = 2;
     private static final int NO_ROOF = 3;
 
-    private static final BlockState KERB = Blocks.CRACKED_STONE_BRICKS.defaultBlockState();
     private static final BlockState BALLAST = Blocks.GRAVEL.defaultBlockState();
     private static final BlockState CANOPY = Blocks.SMOOTH_STONE.defaultBlockState();
 
@@ -51,7 +50,6 @@ public final class Precinct {
 
     // ---- 廣場
     private final boolean round;
-    private final int kerb;
     private final int sculptKind;
     private final int sculptHeight;
     private final int sculptReach;
@@ -84,7 +82,7 @@ public final class Precinct {
                          int height, int throatH, int legH) {
     }
 
-    private Precinct(int kind, int width, int depth, boolean round, int kerb,
+    private Precinct(int kind, int width, int depth, boolean round,
                      int sculptKind, int sculptHeight, int sculptReach,
                      boolean alongX, int platforms, int platformWidth, int gauge, int roofY,
                      int roofKind, Tower[] towers, WaterTower mast, int salt) {
@@ -92,7 +90,6 @@ public final class Precinct {
         this.width = width;
         this.depth = depth;
         this.round = round;
-        this.kerb = kerb;
         this.sculptKind = sculptKind;
         this.sculptHeight = sculptHeight;
         this.sculptReach = sculptReach;
@@ -113,29 +110,31 @@ public final class Precinct {
             // 雕像的尺度跟廣場掛勾：一座小廣場配一根七十格高的碑會變成碑旁邊有塊空地
             int reach = Math.clamp(Math.min(width, depth) / 7, 5, 16);
             return new Precinct(PLAZA, width, depth,
-                    r.nextInt(100) < 45, 1 + r.nextInt(2),
+                    r.nextInt(100) < 45,
                     Math.floorMod(r.nextInt(), 6), reach * 3 + r.nextInt(reach * 3), reach,
                     false, 0, 0, 0, 0, 0, NO_TOWERS, null, salt);
         }
 
         if (kind == TOWER) {
-            return new Precinct(TOWER, width, depth, false, 0, 0, 0, 0,
+            return new Precinct(TOWER, width, depth, false, 0, 0, 0,
                     false, 0, 0, 0, 0, 0, NO_TOWERS, WaterTower.roll(r), salt);
         }
 
         if (kind == PLANT) {
-            return new Precinct(PLANT, width, depth, false, 0, 0, 0, 0,
+            return new Precinct(PLANT, width, depth, false, 0, 0, 0,
                     false, 0, 0, 0, 0, 0, rollTowers(r, width, depth), null, salt);
         }
 
         boolean alongX = r.nextInt(2) == 0;
         int span = alongX ? depth : width;                 // 月台**橫向**排開的方向
-        int platformWidth = 5 + r.nextInt(4);
-        int gauge = 5 + r.nextInt(3);
+        // 月台與軌道區都加倍。原本五到八格寬的月台站上去像月台的模型——
+        // 真的月台要能同時站下一整列車的人，而這座車站的表情就是它空得離譜
+        int platformWidth = 10 + r.nextInt(8);
+        int gauge = 10 + r.nextInt(6);
         int platforms = Math.clamp(span / (platformWidth + gauge), 2, 5);
         // 屋頂訂在二十二到三十五格。原本七到十格，站在月台上像頂著天花板——
         // 火車站的大棚本來就是**空曠**的，那個高度是它唯一的表情
-        return new Precinct(DEPOT, width, depth, false, 0, 0, 0, 0,
+        return new Precinct(DEPOT, width, depth, false, 0, 0, 0,
                 alongX, platforms, platformWidth, gauge,
                 22 + r.nextInt(14), r.nextInt(4), NO_TOWERS, null, salt);
     }
@@ -207,8 +206,56 @@ public final class Precinct {
             }
             return false;
         }
-        if (kind != PLAZA || !round) return true;
-        return inEllipse(u, v, 0);
+        if (kind == PLAZA && round && !inEllipse(u, v, 0)) return false;
+        return !eaten(u, v);
+    }
+
+    /** 土地最多能往裡面吃幾格。 */
+    private static final int BITE = 30;
+
+    /**
+     * 這一格的鋪面有沒有被土地吃掉。
+     *
+     * <p>廣場與月台原本是一塊**邊界完美的長方形水泥板**，而完美的邊界正是它看起來假的原因：
+     * 現實裡沒有人在荒地中央鋪出一塊四角筆直的板，就算有，二十年後草也從外圈長回來了。
+     *
+     * <p>所以侵蝕從**離邊界的距離**算起：外圈最深可以被吃掉三十格，愈往裡愈安全，
+     * 中心永遠留著。深度由一份平滑雜訊決定，所以吃進來的是一片一片的舌狀，
+     * 不是一圈等寬的環——後者只是把長方形縮小，邊界還是完美的。
+     *
+     * <p>吃掉的地方 {@link #covers} 回報 false，於是那裡不整地、不鋪面、地表照長草，
+     * 而水泥板的斷口就成了廣場的新邊界。
+     */
+    private boolean eaten(int u, int v) {
+        int edge = edgeDistance(u, v);
+        if (edge >= BITE) return false;
+
+        // 兩層尺度：大的決定舌頭在哪，小的把斷口咬碎，不然邊緣會是一條滑順的曲線
+        float broad = Masonry.grain(u, 0, v, 34, 34, salt ^ 0x51E3);
+        float fine = Masonry.grain(u, 0, v, 11, 11, salt ^ 0x77B9);
+        float n = broad * 0.72f + fine * 0.28f;
+
+        // 拉開對比：平滑雜訊的值擠在 0.5 附近，直接乘上去的話每個地方都吃掉一半，
+        // 又變成一圈等寬的環
+        float reach = Math.clamp((n - 0.36f) * 2.4f, 0f, 1f);
+        return edge < reach * BITE;
+    }
+
+    /**
+     * 離鋪面邊界幾格。
+     *
+     * <p>圓形廣場要用徑向的距離：用長方形的四邊算，四個角會被當成離邊界很遠，
+     * 但那四個角根本不在廣場上。
+     */
+    private int edgeDistance(int u, int v) {
+        if (kind == PLAZA && round) {
+            double a = Math.max(1, width / 2.0);
+            double b = Math.max(1, depth / 2.0);
+            double du = (u - a) / a;
+            double dv = (v - b) / b;
+            return (int) Math.round((1.0 - Math.sqrt(du * du + dv * dv)) * Math.min(a, b));
+        }
+        return Math.min(Math.min(u, v), Math.min(width - 1 - u, depth - 1 - v));
     }
 
     /** 要往上掃幾格。 */
@@ -276,18 +323,13 @@ public final class Precinct {
     private BlockState plaza(int u, int v, int h, Plot plot, int wx, int wy, int wz) {
         if (h == 0) return plot.skin(wx, wy, wz);
 
-        // 緣石：一圈矮牆，廣場才有邊界。沒有它，鋪面會跟外面的土地糊在一起
-        if (h <= kerb && rim(u, v)) return KERB;
-
+        // 原本沿著外圈立一圈矮牆當緣石，本意是給廣場一個邊界。
+        // 但邊界現在是**土地咬出來的斷口**（見 eaten），那個斷口本身就是邊界，
+        // 而且比一圈規整的矮牆好看得多——矮牆只會把「這是一塊鋪好的板」再強調一次
         int dt = u - width / 2;
         int o = v - depth / 2;
         return Folly.at(dt, o, h - 1, sculptReach, sculptHeight, salt,
                 plot.palette(), wx, wy, wz);
-    }
-
-    private boolean rim(int u, int v) {
-        if (round) return inEllipse(u, v, 0) && !inEllipse(u, v, 2);
-        return u <= 1 || v <= 1 || u >= width - 2 || v >= depth - 2;
     }
 
     private boolean inEllipse(int u, int v, int inset) {
@@ -417,8 +459,13 @@ public final class Precinct {
 
         if (h == -TRENCH) return BALLAST;
         if (h == -TRENCH + 1) {
+            // 軌道區加寬之後中間只擺一條軌會顯得空，改成雙線——
+            // 兩條軌之間那道空隙本來就是月台之間該有的東西
             int mid = platformWidth + gauge / 2;
-            if (Math.abs(band - mid) <= 1
+            int off = gauge / 4;
+            boolean onTrack = Math.abs(band - (mid - off)) <= 1
+                    || Math.abs(band - (mid + off)) <= 1;
+            if (onTrack
                     && Math.floorMod(Masonry.hash(along, index, salt), 100) >= 42) {
                 return Blocks.RAIL.defaultBlockState().setValue(
                         BlockStateProperties.RAIL_SHAPE,
