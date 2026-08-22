@@ -23,7 +23,14 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
  */
 public final class Corridor {
 
-    public enum Kind {VIADUCT, POWER, FOLLY, PIPE}
+    /**
+     * 街廓邊界線上會有的東西。
+     *
+     * <p>**裝置物不在這裡。** 它曾經是第四種，沿線每隔百來格立一座——但沿線擺會讓它
+     * 讀成一排路燈：有節奏、可預期、屬於那條線。裝置物要的是「被丟在那裡」，
+     * 所以它現在只出現在廣場中央（見 {@link Precinct}），一座廣場一尊。
+     */
+    public enum Kind {VIADUCT, POWER, PIPE}
 
     /**
      * 塔身。
@@ -129,17 +136,15 @@ public final class Corridor {
 
         int roll = r.nextInt(100);
         Kind kind;
-        if (roll < 26) return null;
-        else if (roll < 48) kind = Kind.VIADUCT;
-        else if (roll < 62) kind = Kind.POWER;
-        else if (roll < 78) kind = Kind.FOLLY;
+        if (roll < 30) return null;
+        else if (roll < 56) kind = Kind.VIADUCT;
+        else if (roll < 74) kind = Kind.POWER;
         else kind = Kind.PIPE;
 
         int half = Math.max(3, Math.min(s.street(), 10));
         int centre = lineIndex * s.cell();
 
-        // 裝置物之間要留得夠遠：連著擺就變成一排路燈，而它們要像是各自被丟在那裡的
-        int spacing = kind == Kind.FOLLY ? 90 + r.nextInt(80) : 84 + r.nextInt(44);
+        int spacing = 84 + r.nextInt(44);
         int rackY = s.ground() + 9 + r.nextInt(8);
 
         return new Corridor(kind, alongX, centre, half, salt,
@@ -206,16 +211,12 @@ public final class Corridor {
             // 橋面會沿線起伏（見 deckAt），所以上限要含最大的抬升量
             case VIADUCT -> deckY + DECK_SWING + 4;
             case POWER -> terrainY + pylonHeight + 14;
-            case FOLLY -> terrainY + FOLLY_CEILING;
             case PIPE -> rackY + 20;
         };
     }
 
     /** 橋面相對基準高度的最大擺幅，見 {@link #nodeY}。 */
     private static final int DECK_SWING = 12;
-
-    /** 裝置物的高度上限，見 {@link Folly#height}。 */
-    private static final int FOLLY_CEILING = 118;
 
     /**
      * 這一格是什麼，{@code null} ＝ 空氣。
@@ -228,26 +229,8 @@ public final class Corridor {
         return switch (kind) {
             case VIADUCT -> viaduct(t, o, wx, wy, wz, terrainY);
             case POWER -> power(t, o, wx, wy, wz, terrain);
-            case FOLLY -> folly(t, o, wx, wy, wz, terrain);
             case PIPE -> pipe(t, o, wx, wy, wz, terrainY);
         };
-    }
-
-    /**
-     * 裝置物：沿線每隔 {@link #spacing} 立一座，每一座長得都不一樣。
-     *
-     * <p>形狀完全交給 {@link Folly}，這裡只負責把世界座標換成「離這一座多遠、離地多高」，
-     * 以及把每一座的亂數種子算出來。分工的理由跟 {@link Plot} 與 {@link Form} 一樣：
-     * 擺放與造型是兩件會各自變動的事。
-     */
-    private BlockState folly(int t, int o, int wx, int wy, int wz, Plot.Terrain terrain) {
-        int dt = Math.floorMod(t - phase, spacing);
-        int centred = dt <= spacing / 2 ? dt : dt - spacing;
-        int index = Math.floorDiv(t - centred - phase, spacing);
-        int seed = Masonry.hash(index, salt, 0x2E11);
-
-        int base = groundAlong(t - centred, terrain) + 1;
-        return Folly.at(centred, o, wy - base, half - 1, Folly.height(seed), seed, wx, wy, wz);
     }
 
     /** 中心線上、沿線座標 t 的那一點的地面高度。塔腳與導線都要錨在這個高度。 */
