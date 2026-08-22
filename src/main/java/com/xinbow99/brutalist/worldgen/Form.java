@@ -139,89 +139,94 @@ public enum Form {
     },
 
     /**
-     * 集合體：一個巨大的有機外廓，由大大小小的方塊「融」出來。
+     * 集合體：一個巨大的實心外廓，表面上長滿互相重疊的長方體。
      *
-     * <h2>兩層：先有整體，再有方塊</h2>
-     * <p>{@link #ASSEMBLY} 是**由下往上**——擲幾塊大方體，疊出來的側影是它們的副產品，
-     * 所以它永遠讀得出「這是三四塊東西」。這一種反過來：**先決定整體要是什麼形狀**
-     * （一團融合的球體場，見 {@link Plot#blob}），再把空間切成方磚，
-     * 一磚一磚地問「你的中心在不在那個形狀裡面」。
+     * <h2>兩步：先有整體，再讓盒子從表面長出來</h2>
+     * <p>{@link #ASSEMBLY} 是由下往上疊幾塊大方體，側影是副產品，所以永遠讀得出
+     * 「這是三四塊東西」。這一種先決定整體要是什麼形狀（一團融合的球體場，見
+     * {@link Plot#blob}），那團東西**本身就是實心的**；然後在它的表面附近撒下一堆
+     * 長方體，各自往外長。
      *
-     * <p>結果是量體的輪廓由外廓決定、表面的顆粒由方磚決定。遠看是一座山，
-     * 近看是幾千塊各種尺寸的混凝土盒子互相咬合——而那些盒子不是誰擺的，
-     * 是同一個外廓被不同大小的網格取樣出來的。
+     * <h2>盒子不切格子，可以互相重疊</h2>
+     * <p>把空間切成磚、一格只能屬於一塊的話，接縫會全部對齊到同一套網格，
+     * 看起來是乖乖疊好的積木。讓盒子隨機重疊，交界就變成互相插接的稜線——
+     * 「融」出來的感覺全部來自這裡。
      *
-     * <h2>為什麼用球體場而不是雜訊當外廓</h2>
-     * <p>雜訊的等值面會生出**飄在空中的孤島**，而純函數裡沒有辦法回頭檢查連通性。
-     * 球體場則是擲的時候就讓每一顆掛在前一顆的半徑之內（見 {@link Plot#rollLobes}），
-     * 所以整團一定是連通的、也一定落在地上。懸挑跟拱洞照樣有，但不會有斷掉的碎塊。
+     * <h2>盒子哪裡來——不能存一張清單</h2>
+     * <p>蓋滿一團東西的表面要幾百個盒子，而逐格去掃幾百個盒子太貴。
+     * 所以盒子不是存起來的，是**算出來的**：空間上每 {@link #SEED} 格一個晶格單元，
+     * 每個單元用位置雜湊擲出一個盒子（中心在單元內隨機、三軸尺寸各自隨機）。
+     * 問一格屬不屬於某個盒子只要看鄰近 3×3×3 個單元——永遠是二十七次，
+     * 跟盒子總數無關，而且完全是純函數。
      *
-     * <h2>方磚的抖動</h2>
-     * <p>每一塊磚的門檻各自加一點偏移：有的往外凸出外廓、有的往內縮進去。
-     * 沒有這個抖動，表面會精確貼合外廓，看起來像被砂紙磨過的一整塊，
-     * 而不是很多塊拼起來的。
+     * <h2>為什麼盒子的種子一定要落在實心裡面</h2>
+     * <p>種子落在外面的話，盒子可能整個飄在空中，而純函數沒辦法事後檢查連通性。
+     * 限定種子落在外廓內側（或剛好在面上），盒子就一定咬住本體——
+     * 它是從實心裡長出來的，不是黏上去的。
      */
     AGGREGATE {
         @Override
         boolean mass(int u, int v, int h, Plot p) {
-            long brick = brickCentre(u, v, h, p);
-            int bu = (int) (brick >>> 42);
-            int bv = (int) ((brick >>> 21) & MASK);
-            int bh = (int) (brick & MASK);
-
-            // 先問純粹的外廓場。太遠就直接否決——雜訊與抖動只能推動已經在邊界附近的磚，
-            // 不能無中生有，否則天上會飄著幾塊石頭（而純函數沒辦法事後檢查連通性）
-            float core = p.blob(bu, bv, bh);
-            if (core < 0.09f) return false;
-
-            // 門檻的偏移必須是**空間相關**的，不能每塊磚各擲各的。
-            //
-            // 各擲各的話，邊界那一層會變成隨機的黑白棋盤：一塊接受、隔壁拒絕，
-            // 凸出來的磚只剩一個角連著本體，讀起來就是一堆各自漂浮的方塊——
-            // 而這種形狀的前提是**密集**。改用一份尺度好幾塊磚的平滑雜訊，
-            // 凸出去的就是一叢一叢的體塊，中間不會有洞
-            float bias = (Masonry.grain(bu, bh, bv, 30, 30, p.brickSalt()) - 0.5f) * 0.30f;
-            return core + p.blobNoise(bu, bv, bh) + bias >= 0.34f;
+            float core = p.blob(u, v, h);
+            if (core >= CORE) return true;
+            // 離那團東西夠遠就直接否決，不要為了每一格空氣去掃二十七個晶格——
+            // 量體的外接矩形裡絕大多數是空氣，這一行決定整個生成器跑得動跑不動。
+            // 代價只是「伸得特別遠的盒子會被切短」，不會讓任何盒子斷開
+            if (core < 0.03f) return false;
+            return sprout(u, v, h, p) != 0;
         }
     };
 
-    /**
-     * 磚的尺寸從這裡挑。大小差距要夠大，不然看起來只是一種磚加了公差。
-     *
-     * <p>尺度的關係是 **整體 ≫ 磚 > 玩家**：一塊磚三到十格，比人大得多（走過去要繞），
-     * 但相對於一百多格寬的整團只是一格細胞。磚做大（十幾二十格）的話，一團就只剩十來塊，
-     * 讀起來是「幾塊大石頭疊著」而不是「一大團密密麻麻的體塊融在一起」——
-     * 那個密度正是這種形狀的全部。
-     */
-    private static final int[] BRICK = {5, 6, 6, 8, 8, 10, 12, 15};
-
-    /** 每一區用同一種磚尺寸。區的邊界會把磚切開，那些薄片正好是尺度之間的過渡。 */
-    private static final int ZONE = 32;
-
-    private static final long MASK = (1L << 21) - 1;
+    /** 外廓的門檻。低於它就不是實心的本體，只能靠盒子長過來。 */
+    static final float CORE = 0.40f;
 
     /**
-     * 這一格所屬的磚，**中心**打包成一個 long。
-     *
-     * <p>回傳打包的整數而不是一個小物件：這是逐格呼叫的最內層，每一格配一次物件太貴。
+     * 盒子的晶格間距。一個單元一個盒子，而盒子最大到 15 格——比間距大，
+     * 所以相鄰的盒子必然互相重疊，這正是要的。
      */
-    static long brickCentre(int u, int v, int h, Plot p) {
-        int zu = Math.floorDiv(u, ZONE);
-        int zv = Math.floorDiv(v, ZONE);
-        int zh = Math.floorDiv(h, ZONE);
-        int size = BRICK[Math.floorMod(Masonry.hash(zu, zv, zh ^ p.brickSalt()), BRICK.length)];
+    private static final int SEED = 10;
 
-        // 磚對齊到自己那一區的原點，所以相鄰兩區的接縫會錯開
-        int bu = zu * ZONE + Math.floorDiv(u - zu * ZONE, size) * size + size / 2;
-        int bv = zv * ZONE + Math.floorDiv(v - zv * ZONE, size) * size + size / 2;
-        int bh = zh * ZONE + Math.floorDiv(h - zh * ZONE, size) * size + size / 2;
-        return ((long) bu << 42) | ((long) (bv & MASK) << 21) | (bh & MASK);
-    }
+    /**
+     * 這一格被哪一個盒子蓋到，回傳那個盒子的雜湊；{@code 0} ＝ 沒有。
+     *
+     * <p>回傳雜湊而不是布林，材質才有辦法「一個盒子一個顏色」——那是這種形狀
+     * 讀得出「很多塊」的另一半原因，光靠幾何不夠。
+     */
+    static int sprout(int u, int v, int h, Plot p) {
+        int su = Math.floorDiv(u, SEED);
+        int sv = Math.floorDiv(v, SEED);
+        int sh = Math.floorDiv(h, SEED);
 
-    /** 這一格是哪一塊磚，給材質用——每一塊磚各自去雜訊場的不同位置取樣。 */
-    static int brickKey(int u, int v, int h, Plot p) {
-        long brick = brickCentre(u, v, h, p);
-        return Masonry.hash((int) (brick >>> 42), (int) ((brick >>> 21) & MASK), (int) (brick & MASK));
+        for (int du = -1; du <= 1; du++) {
+            for (int dv = -1; dv <= 1; dv++) {
+                for (int dh = -1; dh <= 1; dh++) {
+                    int cu = su + du;
+                    int cv = sv + dv;
+                    int ch = sh + dh;
+                    int key = Masonry.hash(cu, cv ^ p.brickSalt(), ch);
+
+                    // 中心在單元內隨機，三軸尺寸各自隨機——三軸同尺寸的話全是正方體
+                    int bx = cu * SEED + Math.floorMod(key, SEED);
+                    int by = cv * SEED + Math.floorMod(key >>> 4, SEED);
+                    int bz = ch * SEED + Math.floorMod(key >>> 8, SEED);
+                    int a = 5 + ((key >>> 13) & 7);
+                    int b = 5 + ((key >>> 17) & 7);
+                    int c = 5 + ((key >>> 21) & 7);
+
+                    if (Math.abs(u - bx) > a || Math.abs(v - by) > b || Math.abs(h - bz) > c) {
+                        continue;
+                    }
+                    // 貴的那一步留到最後：確定這一格在盒子裡，才去問種子在不在實心裡
+                    // 種子必須落在**實心裡面**，一格都不能寬鬆。
+                    //
+                    // 放寬成「差一點點也算」的話，梯度平緩的地方那個「一點點」會是五六格，
+                    // 而盒子最小半徑只有四格——於是盒子跟本體之間差一格，變成飄在旁邊的積木。
+                    // 收緊成這樣，盒子必定含著一格實心的本體，連通性就不是靠調參數換來的
+                    if (p.blob(bx, by, bz) >= CORE) return key | 1;
+                }
+            }
+        }
+        return 0;
     }
 
     /** 這個點在不在混凝土量體裡面。邊界已由 {@link Plot#solid} 檢查過。 */

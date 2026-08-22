@@ -425,7 +425,7 @@ public final class Plot {
      * 有分岔、有橫向的膨大，那才是「一團」而不是「一串」。
      */
     private static Lobe[] rollLobes(RandomSource r, int width, int depth, int height) {
-        int n = 6 + r.nextInt(7);
+        int n = 12 + r.nextInt(8);
         Lobe[] out = new Lobe[n];
 
         // 第一顆：坐在地面上的底座，横向鋪滿，垂直壓扁
@@ -436,9 +436,9 @@ public final class Plot {
 
         for (int i = 1; i < n; i++) {
             Lobe on = out[r.nextInt(i)];
-            int ru = Math.max(9, width * (18 + r.nextInt(28)) / 100);
-            int rv = Math.max(9, depth * (18 + r.nextInt(28)) / 100);
-            int rh = Math.max(12, height * (12 + r.nextInt(22)) / 100);
+            int ru = Math.max(9, width * (11 + r.nextInt(19)) / 100);
+            int rv = Math.max(9, depth * (11 + r.nextInt(19)) / 100);
+            int rh = Math.max(12, height * (9 + r.nextInt(17)) / 100);
 
             // 球心落在母球半徑之內 → 兩顆一定融得起來
             int u = clamp(on.u() + r.nextInt(on.ru() * 2 + 1) - on.ru(), width - 1);
@@ -461,7 +461,9 @@ public final class Plot {
      * <p>用 {@code (1-d²)²} 而不是硬邊的球：硬邊的話兩顆球交接處會有一道折角，
      * 而這種衰減會讓它們**融**成一個帶頸部的形狀——集合體要的正是那個頸部。
      *
-     * <p>再加一點低頻雜訊把等值面推歪，外廓才不會讀成幾顆球的聯集。
+     * <p>刻意**不加**雜訊：外廓必須是純粹的球體場，它的等值面才保證是一個連通的區域。
+     * 加了雜訊，門檻附近會冒出零星的孤立殼——而不規則的外形現在是由表面長出來的盒子
+     * 負責的，外廓本身乾淨才好。
      */
     float blob(int u, int v, int h) {
         float sum = 0f;
@@ -476,17 +478,6 @@ public final class Plot {
             }
         }
         return sum;
-    }
-
-    /**
-     * 把外廓的等值面推歪的低頻雜訊。
-     *
-     * <p>跟 {@link #blob} 分開回傳，因為呼叫端必須**先**確認這裡真的靠近那團東西，
-     * 才准雜訊參與決定。混在一起的話，離量體幾十格遠、場強是零的地方也會被雜訊
-     * 加到門檻以上——結果是天上飄著幾塊石頭。
-     */
-    float blobNoise(int u, int v, int h) {
-        return (Masonry.grain(u, h, v, 38, 52, brickSalt ^ 0x5B17) - 0.5f) * 0.34f;
     }
 
     int brickSalt() { return brickSalt; }
@@ -599,9 +590,11 @@ public final class Plot {
             // 別的形狀用的是連續的材質場——斑塊會橫跨表面，那正是「一整塊石頭」該有的樣子。
             // 但這一種要說的事剛好相反：**看得出是很多塊**。材質一旦跨過磚縫，
             // 整團就糊回一塊，幾何做的所有努力都白費。所以這裡讓材質服從磚，而不是服從位置
-            int pick = Math.floorMod(Form.brickKey(u, v, h, this), 100);
-            if (pick < 58) return palette.primary();
-            return pick < 86 ? palette.secondary() : palette.accent();
+            int key = Form.sprout(u, v, h, this);
+            if (key == 0) return skin(wx, wy, wz);       // 本體，用連續的材質場
+            int pick = Math.floorMod(key, 100);
+            if (pick < 52) return palette.primary();
+            return pick < 84 ? palette.secondary() : palette.accent();
         }
         return skin(wx, wy, wz);
     }
