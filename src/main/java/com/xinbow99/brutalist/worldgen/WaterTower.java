@@ -27,12 +27,14 @@ public record WaterTower(int baseR, int throatR, int shaftH, int tankR, int tank
     private static final BlockState FRAME = Blocks.POLISHED_DEEPSLATE.defaultBlockState();
     /** 環形走道的護欄與格柵。 */
     private static final BlockState GRATE = Blocks.IRON_BARS.defaultBlockState();
+    /** 桶裡的水。 */
+    private static final BlockState WATER = Blocks.WATER.defaultBlockState();
 
     /** 擲一座。尺寸而已——位置由 {@link Precinct} 決定，它把塔放在整格街廓的正中央。 */
     public static WaterTower roll(RandomSource r) {
         int baseR = 9 + r.nextInt(6);
         return new WaterTower(baseR, Math.max(3, baseR * 55 / 100),
-                30 + r.nextInt(22), baseR + 3 + r.nextInt(4), 9 + r.nextInt(6),
+                38 + r.nextInt(22), baseR + 3 + r.nextInt(4), 9 + r.nextInt(6),
                 8 + r.nextInt(4));
     }
 
@@ -46,6 +48,11 @@ public record WaterTower(int baseR, int throatR, int shaftH, int tankR, int tank
         return baseR + 2;
     }
 
+    /** 連走道帶護欄，整座塔最寬到哪。 */
+    public int reach() {
+        return tankR + WALK + 2;
+    }
+
     /**
      * 這一格是什麼，{@code null} ＝ 空氣。
      *
@@ -54,7 +61,7 @@ public record WaterTower(int baseR, int throatR, int shaftH, int tankR, int tank
     public BlockState blockAt(int du, int dv, int h) {
         if (h < 0 || h > shaftH + tankH + 2) return null;
 
-        int span = tankR + 3;
+        int span = tankR + WALK + 2;
         int d2 = du * du + dv * dv;
         if (d2 > span * span) return null;
         double d = Math.sqrt(d2);
@@ -87,6 +94,9 @@ public record WaterTower(int baseR, int throatR, int shaftH, int tankR, int tank
         double step = Math.PI * 2 / members;
         return near(angle - twist, step, r) || near(angle + twist, step, r) ? STEEL : null;
     }
+
+    /** 環形走道的淨寬（格）。低於三格人繞不過去，那圈走道就只是裝飾。 */
+    private static final int WALK = 3;
 
     /** 一族斜桿從底到頂總共轉過多少角度。轉太少像直的籠子，轉太多會變成麻花 */
     private static final double TWIST = 1.15;
@@ -122,26 +132,36 @@ public record WaterTower(int baseR, int throatR, int shaftH, int tankR, int tank
      */
     private BlockState tank(int h, double d) {
         int up = h - shaftH;
+        int shell = tankR - 1;                 // 桶身比走道的基準半徑內縮一格
+        int rail = tankR + WALK + 1;           // 護欄立在走道外緣
 
         // 底下的錐裙：從塔喉張開到水箱
         if (up <= 2) {
-            int r = throatR + (tankR - throatR) * up / 2;
+            int r = throatR + (shell - throatR) * up / 2;
             return Math.abs(d - r) <= 1.2 ? STEEL : null;
         }
 
-        // 環形走道：一圈實心的板，外緣立格柵當護欄
+        // 環形走道：一圈實心的板，外緣立格柵當護欄。
+        //
+        // 淨寬要有三格。原本桶身外面只剩一格，那不是走道是簷口——人卡在護欄跟桶壁中間，
+        // 而這圈走道存在的唯一理由就是**人可以繞著水箱走一圈**
         int deck = shaftH + 3;
-        if (h == deck && d <= tankR + 2 && d >= tankR - 1) return FRAME;
-        if ((h == deck + 1 || h == deck + 2) && d > tankR + 1 && d <= tankR + 2) return GRATE;
+        if (h == deck && d >= shell - 1 && d <= rail) return FRAME;
+        if ((h == deck + 1 || h == deck + 2) && d > rail - 1 && d <= rail) return GRATE;
 
         if (up > tankH) {
             // 頂上再一圈護欄，側影才不是被切平的
-            return h <= shaftH + tankH + 2 && d >= tankR - 1 && d <= tankR ? GRATE : null;
+            return h <= shaftH + tankH + 2 && d >= shell - 1 && d <= shell ? GRATE : null;
         }
 
-        if (d > tankR) return null;
-        // 桶身是殼，上下各一片蓋
-        if (up == tankH || Math.abs(d - tankR) <= 1.0) return STEEL;
-        return null;
+        if (d > shell) return null;
+
+        // 桶身是殼，**上下都要有蓋**。底板本來沒有，於是這是一個開口朝下的桶——
+        // 從底下的鋼構往上看直接看穿到桶頂，而水塔的水就是靠那塊底板撐著的
+        if (up == 3 || up == tankH || Math.abs(d - shell) <= 1.0) return STEEL;
+
+        // 裡面裝水。頂下留一格空氣：滿到蓋底的桶看不出裡面是液體，
+        // 留一道水面才看得出來
+        return up >= 4 && up <= tankH - 2 && d <= shell - 2 ? WATER : null;
     }
 }
