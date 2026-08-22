@@ -136,7 +136,89 @@ public enum Form {
                     && (Math.floorMod(h - p.plinth(), m)) < m - 2;
             return !(holeU && holeH);
         }
+    },
+
+    /**
+     * 集合體：一個巨大的有機外廓，由大大小小的方塊「融」出來。
+     *
+     * <h2>兩層：先有整體，再有方塊</h2>
+     * <p>{@link #ASSEMBLY} 是**由下往上**——擲幾塊大方體，疊出來的側影是它們的副產品，
+     * 所以它永遠讀得出「這是三四塊東西」。這一種反過來：**先決定整體要是什麼形狀**
+     * （一團融合的球體場，見 {@link Plot#blob}），再把空間切成方磚，
+     * 一磚一磚地問「你的中心在不在那個形狀裡面」。
+     *
+     * <p>結果是量體的輪廓由外廓決定、表面的顆粒由方磚決定。遠看是一座山，
+     * 近看是幾千塊各種尺寸的混凝土盒子互相咬合——而那些盒子不是誰擺的，
+     * 是同一個外廓被不同大小的網格取樣出來的。
+     *
+     * <h2>為什麼用球體場而不是雜訊當外廓</h2>
+     * <p>雜訊的等值面會生出**飄在空中的孤島**，而純函數裡沒有辦法回頭檢查連通性。
+     * 球體場則是擲的時候就讓每一顆掛在前一顆的半徑之內（見 {@link Plot#rollLobes}），
+     * 所以整團一定是連通的、也一定落在地上。懸挑跟拱洞照樣有，但不會有斷掉的碎塊。
+     *
+     * <h2>方磚的抖動</h2>
+     * <p>每一塊磚的門檻各自加一點偏移：有的往外凸出外廓、有的往內縮進去。
+     * 沒有這個抖動，表面會精確貼合外廓，看起來像被砂紙磨過的一整塊，
+     * 而不是很多塊拼起來的。
+     */
+    AGGREGATE {
+        @Override
+        boolean mass(int u, int v, int h, Plot p) {
+            long brick = brickCentre(u, v, h, p);
+            int bu = (int) (brick >>> 42);
+            int bv = (int) ((brick >>> 21) & MASK);
+            int bh = (int) (brick & MASK);
+
+            // 先問純粹的外廓場。太遠就直接否決——雜訊與抖動只能推動已經在邊界附近的磚，
+            // 不能無中生有，否則天上會飄著幾塊石頭（而純函數沒辦法事後檢查連通性）
+            float core = p.blob(bu, bv, bh);
+            if (core < 0.09f) return false;
+
+            // 逐磚的門檻偏移：凸出去或縮進來
+            float bias = (Math.floorMod(Masonry.hash(bu, bv, bh ^ p.brickSalt()), 1000) / 1000f
+                    - 0.44f) * 0.46f;
+            return core + p.blobNoise(bu, bv, bh) + bias >= 0.34f;
+        }
     };
+
+    /**
+     * 磚的尺寸從這裡挑。大小差距要夠大，不然看起來只是一種磚加了公差。
+     *
+     * <p>尺度的關係是 **整體 ≫ 磚 > 玩家**：一塊磚三到十格，比人大得多（走過去要繞），
+     * 但相對於一百多格寬的整團只是一格細胞。磚做大（十幾二十格）的話，一團就只剩十來塊，
+     * 讀起來是「幾塊大石頭疊著」而不是「一大團密密麻麻的體塊融在一起」——
+     * 那個密度正是這種形狀的全部。
+     */
+    private static final int[] BRICK = {3, 4, 4, 5, 6, 6, 8, 10};
+
+    /** 每一區用同一種磚尺寸。區的邊界會把磚切開，那些薄片正好是尺度之間的過渡。 */
+    private static final int ZONE = 21;
+
+    private static final long MASK = (1L << 21) - 1;
+
+    /**
+     * 這一格所屬的磚，**中心**打包成一個 long。
+     *
+     * <p>回傳打包的整數而不是一個小物件：這是逐格呼叫的最內層，每一格配一次物件太貴。
+     */
+    static long brickCentre(int u, int v, int h, Plot p) {
+        int zu = Math.floorDiv(u, ZONE);
+        int zv = Math.floorDiv(v, ZONE);
+        int zh = Math.floorDiv(h, ZONE);
+        int size = BRICK[Math.floorMod(Masonry.hash(zu, zv, zh ^ p.brickSalt()), BRICK.length)];
+
+        // 磚對齊到自己那一區的原點，所以相鄰兩區的接縫會錯開
+        int bu = zu * ZONE + Math.floorDiv(u - zu * ZONE, size) * size + size / 2;
+        int bv = zv * ZONE + Math.floorDiv(v - zv * ZONE, size) * size + size / 2;
+        int bh = zh * ZONE + Math.floorDiv(h - zh * ZONE, size) * size + size / 2;
+        return ((long) bu << 42) | ((long) (bv & MASK) << 21) | (bh & MASK);
+    }
+
+    /** 這一格是哪一塊磚，給材質用——每一塊磚各自去雜訊場的不同位置取樣。 */
+    static int brickKey(int u, int v, int h, Plot p) {
+        long brick = brickCentre(u, v, h, p);
+        return Masonry.hash((int) (brick >>> 42), (int) ((brick >>> 21) & MASK), (int) (brick & MASK));
+    }
 
     /** 這個點在不在混凝土量體裡面。邊界已由 {@link Plot#solid} 檢查過。 */
     abstract boolean mass(int u, int v, int h, Plot p);

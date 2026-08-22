@@ -92,6 +92,12 @@ public final class Plot {
     /** {@link Form#ASSEMBLY} 的組成方塊，其他形狀是空陣列。 */
     private final Box[] boxes;
 
+    /** {@link Form#AGGREGATE} 的外廓球體，其他形狀是空陣列。 */
+    private final Lobe[] lobes;
+
+    /** 集合體的磚格用的 salt。 */
+    private final int brickSalt;
+
     /** 外掛的室外樓梯，{@code null} ＝ 這棟沒有。 */
     private final Stair stair;
 
@@ -106,7 +112,8 @@ public final class Plot {
                  int armGap, int armThickness, int plinth, int parapet,
                  boolean raw, int lift, int columnGap, int columnWidth,
                  Masonry.Palette palette, int decayScale, int decaySalt, float decayAt,
-                 Box[] boxes, Stair stair, Rooftop roof, Precinct precinct) {
+                 Box[] boxes, Lobe[] lobes, int brickSalt,
+                 Stair stair, Rooftop roof, Precinct precinct) {
         this.x0 = x0;
         this.z0 = z0;
         this.baseY = baseY;
@@ -131,6 +138,8 @@ public final class Plot {
         this.decaySalt = decaySalt;
         this.decayAt = decayAt;
         this.boxes = boxes;
+        this.lobes = lobes;
+        this.brickSalt = brickSalt;
         this.stair = stair;
         this.roof = roof;
         this.precinct = precinct;
@@ -174,6 +183,14 @@ public final class Plot {
                 default -> true;
             };
         }
+    }
+
+    /**
+     * 集合體外廓的一顆球。
+     *
+     * <p>三軸半徑分開給：等半徑的球疊起來像一串葡萄，而這個題材要的是壓扁的、橫向發展的塊體。
+     */
+    public record Lobe(int u, int v, int h, int ru, int rv, int rh) {
     }
 
     /** 問「這一柱的地面在哪個高度」。由生成器接到 {@link Ground#height} 上。 */
@@ -226,7 +243,12 @@ public final class Plot {
 
         int width;
         int depth;
-        if (form == Form.PERFORATED) {
+        if (form == Form.AGGREGATE) {
+            // 集合體要**佔滿整塊地**。它的變化來自外廓本身，縮小基地只會讓那團東西
+            // 變成一坨放在空地中間的石頭，而不是一片壓過來的山
+            width = spanX * 9 / 10 + build.nextInt(spanX / 10 + 1);
+            depth = spanZ * 9 / 10 + build.nextInt(spanZ / 10 + 1);
+        } else if (form == Form.PERFORATED) {
             // 穿孔牆要又寬又薄，不然孔洞讀起來像窗戶而不是貫穿的洞
             width = spanX - build.nextInt(Math.max(1, spanX / 4));
             depth = 8 + build.nextInt(10);
@@ -252,6 +274,10 @@ public final class Plot {
         Box[] boxes = form == Form.ASSEMBLY
                 ? rollBoxes(build, width, depth, height)
                 : NO_BOXES;
+        Lobe[] lobes = form == Form.AGGREGATE
+                ? rollLobes(build, width, depth, height)
+                : NO_LOBES;
+        int brickSalt = build.nextInt();
         Stair stair = rollStair(build, form, width, depth, s.street());
         Rooftop roof = Rooftop.roll(build, width, depth);
 
@@ -272,7 +298,7 @@ public final class Plot {
                 12 + build.nextInt(9),
                 build.nextInt(),
                 0.76f + build.nextFloat() * 0.10f,
-                boxes, stair, roof, null);
+                boxes, lobes, brickSalt, stair, roof, null);
     }
 
     /**
@@ -300,7 +326,7 @@ public final class Plot {
         return new Plot(x0, z0, level, width, depth, precinct.top() + 1, Form.SLAB,
                 6, 5, 8, 3, 26, 12, 4, 2, true, 0, 12, 3,
                 palette, 16, build.nextInt(), 2f,
-                NO_BOXES, null, new Rooftop(new Rooftop.Item[0], 0, 0), precinct);
+                NO_BOXES, NO_LOBES, 0, null, new Rooftop(new Rooftop.Item[0], 0, 0), precinct);
     }
 
     /**
@@ -329,6 +355,7 @@ public final class Plot {
     };
 
     private static final Box[] NO_BOXES = new Box[0];
+    private static final Lobe[] NO_LOBES = new Lobe[0];
 
     /**
      * 擲一組組合體。
@@ -383,6 +410,86 @@ public final class Plot {
         }
         return boxes;
     }
+
+    /**
+     * 擲一團外廓球體。
+     *
+     * <h3>連通是擲出來的，不是檢查出來的</h3>
+     * <p>純函數裡沒辦法回頭問「這一塊有沒有接到地面」——那需要追溯，而追溯沒有上界。
+     * 所以連通性必須是**擺放規則的結果**：第一顆坐在地上、罩住大半個平面，
+     * 之後每一顆的球心都落在**某一顆已經存在的球的半徑之內**，兩顆一定重疊。
+     * 於是整團必然連通、也必然落地，一次檢查都不用做。
+     *
+     * <h3>為什麼往上長要挑母球，而不是接著上一顆</h3>
+     * <p>接著上一顆會長成一條鏈——一根歪歪扭扭的柱子。隨機挑一顆當母球則會長成一叢，
+     * 有分岔、有橫向的膨大，那才是「一團」而不是「一串」。
+     */
+    private static Lobe[] rollLobes(RandomSource r, int width, int depth, int height) {
+        int n = 6 + r.nextInt(7);
+        Lobe[] out = new Lobe[n];
+
+        // 第一顆：坐在地面上的底座，横向鋪滿，垂直壓扁
+        out[0] = new Lobe(width / 2, depth / 2, height / 8,
+                Math.max(12, width * (46 + r.nextInt(18)) / 100),
+                Math.max(12, depth * (46 + r.nextInt(18)) / 100),
+                Math.max(14, height / 4));
+
+        for (int i = 1; i < n; i++) {
+            Lobe on = out[r.nextInt(i)];
+            int ru = Math.max(9, width * (18 + r.nextInt(28)) / 100);
+            int rv = Math.max(9, depth * (18 + r.nextInt(28)) / 100);
+            int rh = Math.max(12, height * (12 + r.nextInt(22)) / 100);
+
+            // 球心落在母球半徑之內 → 兩顆一定融得起來
+            int u = clamp(on.u() + r.nextInt(on.ru() * 2 + 1) - on.ru(), width - 1);
+            int v = clamp(on.v() + r.nextInt(on.rv() * 2 + 1) - on.rv(), depth - 1);
+            // 高度偏向往上：不加這個偏壓，整團會攤成一塊餅。
+            // 最後兩顆直接頂到天花板——不然這團東西只長到基地允許高度的一半，
+            // 而它是這個世界裡最該有存在感的一種
+            int h = i >= n - 2
+                    ? height - 1 - r.nextInt(Math.max(1, rh / 2))
+                    : clamp(on.h() + r.nextInt(on.rh() + rh) - on.rh() / 3, height - 1);
+
+            out[i] = new Lobe(u, v, h, ru, rv, rh);
+        }
+        return out;
+    }
+
+    /**
+     * 外廓的場強。大於門檻就是「在那團東西裡面」。
+     *
+     * <p>用 {@code (1-d²)²} 而不是硬邊的球：硬邊的話兩顆球交接處會有一道折角，
+     * 而這種衰減會讓它們**融**成一個帶頸部的形狀——集合體要的正是那個頸部。
+     *
+     * <p>再加一點低頻雜訊把等值面推歪，外廓才不會讀成幾顆球的聯集。
+     */
+    float blob(int u, int v, int h) {
+        float sum = 0f;
+        for (Lobe lobe : lobes) {
+            float du = (u - lobe.u()) / (float) lobe.ru();
+            float dv = (v - lobe.v()) / (float) lobe.rv();
+            float dh = (h - lobe.h()) / (float) lobe.rh();
+            float d = du * du + dv * dv + dh * dh;
+            if (d < 1f) {
+                float f = 1f - d;
+                sum += f * f;
+            }
+        }
+        return sum;
+    }
+
+    /**
+     * 把外廓的等值面推歪的低頻雜訊。
+     *
+     * <p>跟 {@link #blob} 分開回傳，因為呼叫端必須**先**確認這裡真的靠近那團東西，
+     * 才准雜訊參與決定。混在一起的話，離量體幾十格遠、場強是零的地方也會被雜訊
+     * 加到門檻以上——結果是天上飄著幾塊石頭。
+     */
+    float blobNoise(int u, int v, int h) {
+        return (Masonry.grain(u, h, v, 38, 52, brickSalt ^ 0x5B17) - 0.5f) * 0.34f;
+    }
+
+    int brickSalt() { return brickSalt; }
 
     private static int clamp(int value, int max) {
         return Math.max(0, Math.min(Math.max(0, max), value));
@@ -486,6 +593,16 @@ public final class Plot {
         // 破口的邊緣：還沒垮掉、但已經碎了。同一個雜訊值順手用掉，不必再算一次
         if (decay >= decayAt - 0.05f) return Masonry.COBBLE;
 
+        if (form == Form.AGGREGATE) {
+            // 一塊磚一個顏色，整塊都一樣。
+            //
+            // 別的形狀用的是連續的材質場——斑塊會橫跨表面，那正是「一整塊石頭」該有的樣子。
+            // 但這一種要說的事剛好相反：**看得出是很多塊**。材質一旦跨過磚縫，
+            // 整團就糊回一塊，幾何做的所有努力都白費。所以這裡讓材質服從磚，而不是服從位置
+            int pick = Math.floorMod(Form.brickKey(u, v, h, this), 100);
+            if (pick < 58) return palette.primary();
+            return pick < 86 ? palette.secondary() : palette.accent();
+        }
         return skin(wx, wy, wz);
     }
 
@@ -637,12 +754,13 @@ public final class Plot {
      */
     private static Form pickForm(RandomSource r) {
         int roll = r.nextInt(100);
-        if (roll < 28) return Form.ASSEMBLY;
-        if (roll < 48) return Form.SLAB;
-        if (roll < 60) return Form.ZIGGURAT;
-        if (roll < 72) return Form.INVERTED;
-        if (roll < 85) return Form.CROSS;
-        if (roll < 93) return Form.PERFORATED;
+        if (roll < 16) return Form.AGGREGATE;
+        if (roll < 40) return Form.ASSEMBLY;
+        if (roll < 57) return Form.SLAB;
+        if (roll < 67) return Form.ZIGGURAT;
+        if (roll < 77) return Form.INVERTED;
+        if (roll < 88) return Form.CROSS;
+        if (roll < 94) return Form.PERFORATED;
         return Form.CYLINDER;   // 圓筒最少，它的作用是打斷網格，多了就不特別了
     }
 
