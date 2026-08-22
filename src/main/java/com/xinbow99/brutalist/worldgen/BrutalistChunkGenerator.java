@@ -87,6 +87,7 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
     /** 候車亭的散佈網格 → 那一格上的那一座。 */
     private final ConcurrentHashMap<Long, Optional<Shelter>> shelters = new ConcurrentHashMap<>();
 
+
     /** 候車亭散佈網格的邊長。比街廓小得多，它們不歸任何一格街廓管。 */
     private static final int SCATTER = 64;
 
@@ -649,6 +650,7 @@ public class BrutalistChunkGenerator extends ChunkGenerator {
             lines.add("Brutalist: " + switch (plot.precinct().kind()) {
                         case Precinct.PLAZA -> "廣場";
                         case Precinct.PLANT -> "冷卻塔群";
+                        case Precinct.TOWER -> "水塔";
                         default -> "公車總站";
                     }
                     + " " + plot.width() + "x" + plot.depth());

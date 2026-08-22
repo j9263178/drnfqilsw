@@ -28,6 +28,13 @@ public final class Precinct {
     public static final int DEPOT = 1;
     /** 冷卻塔群。見 {@link #tower}。 */
     public static final int PLANT = 2;
+    /**
+     * 空地上的一座舒霍夫式水塔。
+     *
+     * <p>它佔一整格街廓**只為了空出那一格**：塔本身只有二十幾格寬，剩下的一百多格
+     * 是刻意留白的。孤獨是這座塔的內容，而孤獨只能用周圍的空來寫。
+     */
+    public static final int TOWER = 3;
 
     private static final int FLAT = 0;
     private static final int BARREL = 1;
@@ -60,6 +67,9 @@ public final class Precinct {
     // ---- 冷卻塔群
     private final Tower[] towers;
 
+    // ---- 水塔
+    private final WaterTower mast;
+
     private final int salt;
 
     /**
@@ -77,7 +87,7 @@ public final class Precinct {
     private Precinct(int kind, int width, int depth, boolean round, int kerb,
                      int sculptKind, int sculptHeight, int sculptReach,
                      boolean alongX, int platforms, int platformWidth, int gauge, int roofY,
-                     int roofKind, Tower[] towers, int salt) {
+                     int roofKind, Tower[] towers, WaterTower mast, int salt) {
         this.kind = kind;
         this.width = width;
         this.depth = depth;
@@ -93,6 +103,7 @@ public final class Precinct {
         this.roofY = roofY;
         this.roofKind = roofKind;
         this.towers = towers;
+        this.mast = mast;
         this.salt = salt;
     }
 
@@ -104,12 +115,17 @@ public final class Precinct {
             return new Precinct(PLAZA, width, depth,
                     r.nextInt(100) < 45, 1 + r.nextInt(2),
                     Math.floorMod(r.nextInt(), 6), reach * 3 + r.nextInt(reach * 3), reach,
-                    false, 0, 0, 0, 0, 0, NO_TOWERS, salt);
+                    false, 0, 0, 0, 0, 0, NO_TOWERS, null, salt);
+        }
+
+        if (kind == TOWER) {
+            return new Precinct(TOWER, width, depth, false, 0, 0, 0, 0,
+                    false, 0, 0, 0, 0, 0, NO_TOWERS, WaterTower.roll(r), salt);
         }
 
         if (kind == PLANT) {
             return new Precinct(PLANT, width, depth, false, 0, 0, 0, 0,
-                    false, 0, 0, 0, 0, 0, rollTowers(r, width, depth), salt);
+                    false, 0, 0, 0, 0, 0, rollTowers(r, width, depth), null, salt);
         }
 
         boolean alongX = r.nextInt(2) == 0;
@@ -121,7 +137,7 @@ public final class Precinct {
         // 火車站的大棚本來就是**空曠**的，那個高度是它唯一的表情
         return new Precinct(DEPOT, width, depth, false, 0, 0, 0, 0,
                 alongX, platforms, platformWidth, gauge,
-                22 + r.nextInt(14), r.nextInt(4), NO_TOWERS, salt);
+                22 + r.nextInt(14), r.nextInt(4), NO_TOWERS, null, salt);
     }
 
     private static final Tower[] NO_TOWERS = new Tower[0];
@@ -172,6 +188,13 @@ public final class Precinct {
     /** 這一格的鋪面蓋到哪。基座要靠它決定往下補到哪裡。 */
     public boolean covers(int u, int v) {
         if (u < 0 || v < 0 || u >= width || v >= depth) return false;
+        if (kind == TOWER) {
+            // 只整平塔腳那一小圈，其餘一百多格保持原本的土地——那片空地就是這一格的內容
+            int du = u - width / 2;
+            int dv = v - depth / 2;
+            int rr = mast.footing();
+            return du * du + dv * dv <= rr * rr;
+        }
         if (kind == PLANT) {
             // **只蓋住每座塔腳下那一圈。** 整格鋪成水泥的話，這群塔會像被放在一塊
             // 標示用的底板上——而它們該是坐在土地上的。塔底仍然要整平一小塊，
@@ -190,6 +213,7 @@ public final class Precinct {
 
     /** 要往上掃幾格。 */
     public int top() {
+        if (kind == TOWER) return mast.top();
         if (kind == PLAZA) return sculptHeight + 3;
         if (kind != PLANT) return roofY + 9;
         int tallest = 12;
@@ -234,6 +258,11 @@ public final class Precinct {
      * @param h 相對鋪面的高度，0 就是鋪面本身
      */
     public BlockState blockAt(int u, int v, int h, Plot plot, int wx, int wy, int wz) {
+        // 水塔不吃 covers()：那個遮罩是**整地範圍**（只有塔腳那一小圈），
+        // 而水箱比塔腳寬得多。拿它當繪製遮罩的話，整顆頭會被裁掉只剩塔身
+        if (kind == TOWER) {
+            return h > top() ? null : mast.blockAt(u - width / 2, v - depth / 2, h);
+        }
         if (!covers(u, v) || h < -TRENCH - 2 || h > top()) return null;
         return switch (kind) {
             case PLAZA -> plaza(u, v, h, plot, wx, wy, wz);

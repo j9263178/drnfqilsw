@@ -231,8 +231,11 @@ public final class Plot {
         // 少數幾格不蓋樓。整片都是三百格高的量體時，「高」會失去意義——
         // 空出來的那一格是對照組
         int use = build.nextInt(100);
-        if (use < 19) {
-            int what = use < 8 ? Precinct.PLAZA : use < 14 ? Precinct.DEPOT : Precinct.PLANT;
+        // 四分之一的街廓不蓋樓：廣場 8%、公車總站 6%、冷卻塔群 5%、水塔 7%
+        if (use < 26) {
+            int what = use < 8 ? Precinct.PLAZA
+                    : use < 14 ? Precinct.DEPOT
+                    : use < 19 ? Precinct.PLANT : Precinct.TOWER;
             return open(build, what,
                     originX + s.street(), originZ + s.street(), spanX, spanZ, terrain);
         }
